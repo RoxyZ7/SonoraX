@@ -427,10 +427,9 @@ impl Lyrics {
         let text = text.clone();
         let key = self.key(&id, cx);
         let version = lyrics_auto::fingerprint(&text);
-        let engine = lyrics_auto::engine();
         let client = self.session.read(cx).client();
         let online = !crate::Network::offline(cx);
-        let generate = engine.is_some()
+        let generate = lyrics_auto::supported()
             && client.is_some()
             && online
             && self.attempted_auto.insert((key.clone(), version.clone()));
@@ -452,12 +451,13 @@ impl Lyrics {
                 if let Some(lrc) = cached {
                     return Ok(attachment_lyrics(&lrc));
                 }
-                let (Some(engine), Some(client), true) = (engine, client, generate) else {
+                let (Some(client), true) = (client, generate) else {
                     return Ok(None);
                 };
                 let Some(pcm) = client.lyrics_audio(&for_audio, quality, &vault).await? else {
                     return Ok(None);
                 };
+                let engine = lyrics_auto::ensure_engine().await?;
                 tokio::task::spawn_blocking(move || {
                     let Some(lrc) = lyrics_auto::generate(&engine, &pcm, &text)? else {
                         return Ok(None);

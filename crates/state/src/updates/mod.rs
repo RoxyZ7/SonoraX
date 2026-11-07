@@ -73,7 +73,10 @@ impl Channel {
     }
 
     fn url(self) -> String {
-        format!("{RELEASES}/latest")
+        match self {
+            Self::Stable => format!("{RELEASES}/latest"),
+            Self::Nightly => format!("{RELEASES}/tags/nightly"),
+        }
     }
 }
 

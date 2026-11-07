@@ -203,16 +203,16 @@
               ${
                 if pkgs.stdenv.hostPlatform.isDarwin then
                   ''
-                    install -Dm755 "target/${pkgs.stdenv.hostPlatform.rust.cargoShortTarget}/$cargoBuildType/sonora" "$out/Applications/Sonora.app/Contents/MacOS/sonora"
+                    install -Dm755 "target/${pkgs.stdenv.hostPlatform.rust.cargoShortTarget}/$cargoBuildType/sonora" "$out/Applications/SonoraX.app/Contents/MacOS/sonora"
                     install -Dm444 "$src/assets/macos/sonora.icns" \
-                      "$out/Applications/Sonora.app/Contents/Resources/sonora.icns"
+                      "$out/Applications/SonoraX.app/Contents/Resources/sonora.icns"
 
                     sed \
                       "s/@VERSION@/$version/g" \
                       "$src/assets/macos/Info.plist" \
-                      > "$out/Applications/Sonora.app/Contents/Info.plist"
+                      > "$out/Applications/SonoraX.app/Contents/Info.plist"
 
-                    LICENSE_DIR="$out/Applications/Sonora.app/Contents/Resources"
+                    LICENSE_DIR="$out/Applications/SonoraX.app/Contents/Resources"
                   ''
                 else
                   ''
@@ -260,8 +260,7 @@
             platforms = lib.platforms.linux ++ lib.platforms.darwin;
           };
 
-          # Installs the binaries a GitHub release publishes under `tag`. Every asset is named
-          # `sonora-<tag>-<target>`, and `assets` maps a Nix system to its target and hash.
+          # Installs the binaries a SonoraX GitHub release publishes under `tag`.
           prebuilt =
             {
               pname,
@@ -276,7 +275,7 @@
               inherit pname version meta;
 
               src = pkgs.fetchurl {
-                url = "https://github.com/sonorahq/sonora/releases/download/${tag}/sonora-${tag}-${asset.target}${
+                url = "https://github.com/RoxyZ7/SonoraX/releases/download/${tag}/SonoraX-${tag}-${asset.target}${
                   if pkgs.stdenv.hostPlatform.isDarwin then ".dmg" else ""
                 }";
                 inherit (asset) hash;
@@ -325,10 +324,10 @@
                     mnt="$(mktemp -d)"
                     /usr/bin/hdiutil attach -readonly -nobrowse -mountpoint "$mnt" "$src"
                     mkdir -p "$out/Applications" "$out/bin"
-                    cp -R "$mnt/Sonora.app" "$out/Applications/Sonora.app"
+                    cp -R "$mnt/SonoraX.app" "$out/Applications/SonoraX.app"
                     /usr/bin/hdiutil detach "$mnt"
                     makeBinaryWrapper \
-                      "$out/Applications/Sonora.app/Contents/MacOS/sonora" \
+                      "$out/Applications/SonoraX.app/Contents/MacOS/sonora" \
                       "$out/bin/sonora"
                     runHook postInstall
                   '';

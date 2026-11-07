@@ -14,13 +14,13 @@
   <a href="https://sonorahq.org/faq">FAQ</a>
 </p>
 
-[![Build](https://img.shields.io/github/actions/workflow/status/RoxyZ7/SonoraX/sonorax-release.yml?style=flat-square&label=build)](https://github.com/RoxyZ7/SonoraX/actions/workflows/sonorax-release.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/RoxyZ7/SonoraX/release.yml?style=flat-square&label=build)](https://github.com/RoxyZ7/SonoraX/actions/workflows/release.yml)
 [![License](https://img.shields.io/github/license/RoxyZ7/SonoraX?style=flat-square&label=license&cacheSeconds=3600)](./COPYING)
 
 ### A Thai-localized fork of Sonora
 
 Stream from your favorite services and play local files — all in one **native** app.
-SonoraX is an unofficial community fork. It keeps its own public source and Windows releases, and checks this repository for updates.
+SonoraX is an unofficial community fork with its own public source, Windows, Linux and macOS releases, and automatic updates from this repository.
 </div>
 
 <div align="center">
@@ -49,9 +49,9 @@ SonoraX is an unofficial community fork. It keeps its own public source and Wind
 > [!IMPORTANT]
 > **SonoraX is not a piracy tool.**
 >
-> Sonora is not a platform for obtaining or sharing copyrighted material. We will not implement any functions that can be used to export decrypted streams, DRM licenses, content keys, or to convert protected streams into media files.
+> SonoraX is not a platform for obtaining or sharing copyrighted material. We will not implement any functions that can be used to export decrypted streams, DRM licenses, content keys, or to convert protected streams into media files.
 >
-> Sonora is not designed to circumvent subscriptions or other restrictions put in place by music streaming platforms. If the service demands that you have a valid subscription in order to play back their tracks, so will Sonora.
+> SonoraX is not designed to circumvent subscriptions or other restrictions put in place by music streaming platforms. If the service demands that you have a valid subscription in order to play back their tracks, so will SonoraX.
 >
 > Features aimed at ripping, downloading, distributing, or gaining access to protected streaming content are out of scope for the project.
 
@@ -61,103 +61,28 @@ SonoraX is based on [Sonora](https://github.com/sonorahq/sonora), an open-source
 
 ## Download
 
+All SonoraX installers and builds are published on [SonoraX Releases](https://github.com/RoxyZ7/SonoraX/releases/latest). SonoraX checks for a newer release at startup and installs it automatically on supported self-updating installs. If an update is published while SonoraX is running, it shows an update notice.
+
 ### Windows
 
-Download the latest `SonoraX-x86_64-pc-windows-msvc.exe` from [SonoraX Releases](https://github.com/RoxyZ7/SonoraX/releases/latest). SonoraX checks for newer releases at startup and installs them automatically. When an update appears while the app is open, it shows an update notice.
-
-## Upstream installation
-
-The following installation methods install the original Sonora, not SonoraX.
+Download and run `SonoraX-Setup.exe` (or `SonoraX-Setup-arm64.exe` on Windows on ARM). Portable executables are also available for both architectures.
 
 ### macOS
 
-Install with [Brew](https://brew.sh/):
-
-```sh
-brew install --cask nolight132/tap/sonora
-```
-
-After installing (thanks Apple):
-
-```sh
-xattr -dr com.apple.quarantine /Applications/Sonora.app
-```
-
-Or install the [disk image](https://github.com/sonorahq/sonora/releases/latest), which updates itself.
+Download the macOS disk image from [SonoraX Releases](https://github.com/RoxyZ7/SonoraX/releases/latest), open it and move SonoraX to Applications.
 
 ### Linux
 
-#### Arch
-
-Install from the AUR with your AUR helper of choice:
+Download the AppImage or Flatpak bundle for your architecture. Make an AppImage executable before running it:
 
 ```sh
-yay -S sonora-bin
+chmod +x SonoraX-*.AppImage
+./SonoraX-*.AppImage
 ```
-
-Or:
-
-```sh
-yay -S sonora
-```
-
-#### Flatpak
-
-```sh
-flatpak install --user https://sonorahq.github.io/sonora/sonora.flatpakref
-```
-
-#### AppImage
-
-Download from the [latest release](https://github.com/sonorahq/sonora/releases/latest), make it executable and run
-it:
-
-```sh
-chmod +x sonora-*.AppImage
-./sonora-*.AppImage
-```
-
-### Nix
-
-Add either of those inputs:
-
-```nix
-inputs.sonora.url = "github:sonorahq/sonora";
-```
-
-```text
-inputs.sonora.packages.${system}.default     (prebuilt where available, else from source)
-inputs.sonora.packages.${system}.sonora      (same as default)
-inputs.sonora.packages.${system}.sonora-bin  (prebuilt, x86_64-linux, aarch64-linux, aarch64-darwin)
-inputs.sonora.packages.${system}.sonora-src  (always built from source)
-```
-
-Building from source on macOS needs Xcode added to the Nix store, because the shaders compile with Apple's Metal compiler.
-
-Configuration with Home Manager is provided by the module under `programs.sonora`.
-
-### Windows
-
-#### Installer
-
-Download and run the [installer](https://github.com/sonorahq/sonora/releases/latest/download/Sonora-Setup.exe),
-or the [ARM installer](https://github.com/sonorahq/sonora/releases/latest/download/Sonora-Setup-arm64.exe)
-on Windows on ARM.
-
-#### Portable
-
-Download the latest `windows-msvc.exe` for your architecture from [Releases](https://github.com/sonorahq/sonora/releases/latest).
 
 ### Nightly
 
-[Nightly builds](https://github.com/sonorahq/sonora/releases/tag/nightly) are available.
-
-```sh
-brew install --cask nolight132/tap/sonora-nightly
-yay -S sonora-nightly-bin
-nix run github:sonorahq/sonora/nightly
-```
-
+Preview builds for Windows, Linux and macOS are published at [SonoraX Nightly](https://github.com/RoxyZ7/SonoraX/releases/tag/nightly). Nightly builds update from the nightly channel.
 ## Community
 
 Feel free to join our [Discord](https://discord.gg/a8N8Tx23rV) server and [Matrix](https://matrix.to/#/#sonora:nolight.dev) space.
@@ -200,7 +125,7 @@ Discord is the primary one, but we do have a Matrix bridge.
 
 ## Credits
 
-Sonora is built with the help of some incredible open-source projects, including:
+SonoraX is built on Sonora and uses the help of some incredible open-source projects, including:
 
 - [Zed](https://github.com/zed-industries/zed) — a wonderful editor (~~ab~~)used by all core team members. Conveniently provides `gpui` — their native Rust rendering stack.
 - [librespot](https://github.com/librespot-org/librespot) — Spotify playback and library integration.
@@ -221,10 +146,10 @@ through SignPath.
 
 Copyright (C) 2026 Sonora Contributors.
 
-Sonora is free software, released under the [GNU General Public License version
+SonoraX is free software, released under the [GNU General Public License version
 3 or later](COPYING).
 
-Sonora is an unofficial client and is not affiliated with, endorsed by, or
+SonoraX is an unofficial client and is not affiliated with, endorsed by, or
 sponsored by Spotify AB.
 
 The binary also embeds the [Inter](https://github.com/rsms/inter) typeface (SIL

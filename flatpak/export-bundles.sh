@@ -9,7 +9,7 @@ fi
 REPO="$1"
 TAG="$2"
 OUT="$3"
-APP=io.github.nolight132.sonora
+APP=io.github.roxyz7.SonoraX
 BRANCH=stable
 RUNTIME_REPO=https://flathub.org/repo/flathub.flatpakrepo
 
@@ -30,7 +30,7 @@ if [ -z "$ARCHES" ]; then
 fi
 
 for arch in $ARCHES; do
-  bundle="$OUT/sonora-$TAG-$arch.flatpak"
+  bundle="$OUT/SonoraX-$TAG-$arch.flatpak"
   echo "==> $bundle"
   flatpak build-bundle \
     --arch="$arch" \

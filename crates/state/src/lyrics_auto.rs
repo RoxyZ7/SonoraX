@@ -1,4 +1,4 @@
-use std::io::{BufWriter, Write as _};
+use std::io::{BufWriter, Cursor, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -13,6 +13,27 @@ pub const SOURCE: &str = "Auto sync";
 const MODEL: &str = "ggml-small-q5_1.bin";
 const RATE: u32 = 16_000;
 const TIME_LIMIT: Duration = Duration::from_secs(12 * 60);
+const ENGINE_VERSION: &str = "v1.9.2";
+const ENGINE_EXE: &str = if cfg!(windows) {
+    "whisper-cli.exe"
+} else {
+    "whisper-cli"
+};
+const MODEL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/98aa99a0a9db05ae2342309f5096248665f7cba3/ggml-small-q5_1.bin";
+const MODEL_SHA256: &str = "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb";
+const MODEL_MAX_BYTES: u64 = 250 * 1024 * 1024;
+const RELEASES: &str = "https://api.github.com/repos/RoxyZ7/SonoraX/releases";
+
+#[derive(Deserialize)]
+struct Published {
+    assets: Vec<ReleaseAsset>,
+}
+
+#[derive(Deserialize)]
+struct ReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
 
 #[derive(Deserialize)]
 struct Transcript {
@@ -36,14 +57,191 @@ struct Offsets {
     to: i64,
 }
 
-/// Finds the optional local engine shipped next to the Windows executable.
+/// Finds the platform engine, whether it was shipped beside the app or downloaded once to cache.
 pub(crate) fn engine() -> Option<PathBuf> {
-    let dir = std::env::current_exe()
-        .ok()?
-        .parent()?
-        .join("lyrics-engine");
-    let exe = dir.join("whisper-cli.exe");
-    (exe.is_file() && dir.join(MODEL).is_file()).then_some(exe)
+    let installed = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.join("lyrics-engine")));
+    let cached =
+        dirs::cache_dir().map(|cache| cache.join("SonoraX/lyrics-engine").join(ENGINE_VERSION));
+    installed
+        .into_iter()
+        .chain(cached)
+        .map(|dir| dir.join(ENGINE_EXE))
+        .find(|exe| exe.is_file() && exe.parent().is_some_and(|dir| dir.join(MODEL).is_file()))
+}
+
+pub(crate) fn supported() -> bool {
+    engine_target().is_some() || engine().is_some()
+}
+
+/// Gets the platform engine and pinned model once, keeping the large model out of app updates.
+pub(crate) async fn ensure_engine() -> Result<PathBuf> {
+    if let Some(engine) = engine() {
+        return Ok(engine);
+    }
+    let target = engine_target().context("automatic lyrics alignment is unsupported here")?;
+    let root = dirs::cache_dir()
+        .context("cannot locate the application cache directory")?
+        .join("SonoraX/lyrics-engine");
+    let destination = root.join(ENGINE_VERSION);
+    tokio::fs::create_dir_all(&root).await?;
+    let stage = tempfile::Builder::new()
+        .prefix("lyrics-engine-")
+        .tempdir_in(&root)?;
+    let engine_dir = stage.path().join("engine");
+    tokio::fs::create_dir(&engine_dir).await?;
+
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("SonoraX/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(30 * 60))
+        .build()?;
+    let tag = match crate::VERSION.contains("-nightly") {
+        true => "nightly".to_owned(),
+        false if crate::VERSION == env!("CARGO_PKG_VERSION") => "latest".to_owned(),
+        false => format!("v{}", crate::VERSION),
+    };
+    let release: Published = client
+        .get(format!("{RELEASES}/{tag}"))
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let archive_name = format!("SonoraX-lyrics-engine-{target}.tar.gz");
+    let archive = release
+        .assets
+        .iter()
+        .find(|asset| asset.name == archive_name)
+        .context("this release has no lyrics engine for the current platform")?;
+    let checksums_url =
+        format!("https://github.com/RoxyZ7/SonoraX/releases/download/{tag}/SHA256SUMS");
+    let checksums = client
+        .get(checksums_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    let expected = checksums
+        .lines()
+        .filter_map(|line| line.split_once(char::is_whitespace))
+        .find(|(_, name)| name.trim() == archive_name)
+        .map(|(hash, _)| hash.trim().to_ascii_lowercase())
+        .context("the release has no checksum for its lyrics engine")?;
+    let archive_bytes = client
+        .get(&archive.browser_download_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?;
+    anyhow::ensure!(
+        format!("{:x}", Sha256::digest(&archive_bytes)) == expected,
+        "lyrics engine archive failed its SHA-256 check"
+    );
+    tokio::task::spawn_blocking({
+        let engine_dir = engine_dir.clone();
+        move || extract_engine(&archive_bytes, &engine_dir)
+    })
+    .await??;
+
+    let model_path = engine_dir.join(MODEL);
+    let mut model_file = tokio::fs::File::create(&model_path).await?;
+    let mut response = client.get(MODEL_URL).send().await?.error_for_status()?;
+    let mut digest = Sha256::new();
+    let mut size = 0u64;
+    while let Some(chunk) = response.chunk().await? {
+        size = size
+            .checked_add(chunk.len() as u64)
+            .context("lyrics model size overflow")?;
+        anyhow::ensure!(
+            size <= MODEL_MAX_BYTES,
+            "lyrics model download is too large"
+        );
+        digest.update(&chunk);
+        tokio::io::AsyncWriteExt::write_all(&mut model_file, &chunk).await?;
+    }
+    tokio::io::AsyncWriteExt::flush(&mut model_file).await?;
+    anyhow::ensure!(
+        format!("{:x}", digest.finalize()) == MODEL_SHA256,
+        "lyrics model failed its SHA-256 check"
+    );
+    drop(model_file);
+
+    if let Some(engine) = engine() {
+        return Ok(engine);
+    }
+    if destination.exists() {
+        std::fs::remove_dir_all(&destination)
+            .context("cannot replace an incomplete lyrics engine cache")?;
+    }
+    match std::fs::rename(&engine_dir, &destination) {
+        Ok(()) => {}
+        Err(error) if destination.is_dir() => {
+            log::debug!("lyrics: another process installed the engine: {error}");
+        }
+        Err(error) => return Err(error).context("cannot install the lyrics engine cache"),
+    }
+    engine().context("lyrics engine installation did not produce the expected files")
+}
+
+fn engine_target() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", "x86_64") => Some("x86_64-pc-windows-msvc"),
+        ("windows", "aarch64") => Some("aarch64-pc-windows-msvc"),
+        ("linux", "x86_64") => Some("x86_64-unknown-linux-gnu"),
+        ("linux", "aarch64") => Some("aarch64-unknown-linux-gnu"),
+        ("macos", "x86_64") => Some("x86_64-apple-darwin"),
+        ("macos", "aarch64") => Some("aarch64-apple-darwin"),
+        _ => None,
+    }
+}
+
+fn extract_engine(archive: &[u8], destination: &Path) -> Result<()> {
+    let decoder = flate2::read::GzDecoder::new(Cursor::new(archive));
+    let mut archive = tar::Archive::new(decoder);
+    let mut found_executable = false;
+    let mut found_license = false;
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        if !entry.header().entry_type().is_file() {
+            continue;
+        }
+        let Some(name) = entry.path()?.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let destination_name = match name {
+            name if name == ENGINE_EXE => {
+                found_executable = true;
+                ENGINE_EXE
+            }
+            "LICENSE.whisper.cpp" => {
+                found_license = true;
+                "LICENSE.whisper.cpp"
+            }
+            _ => continue,
+        };
+        let mut file = std::fs::File::create(destination.join(destination_name))?;
+        std::io::copy(&mut entry, &mut file)?;
+        if destination_name == ENGINE_EXE {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                file.set_permissions(std::fs::Permissions::from_mode(0o755))?;
+            }
+        }
+    }
+    anyhow::ensure!(
+        found_executable,
+        "lyrics archive is missing the engine executable"
+    );
+    anyhow::ensure!(
+        found_license,
+        "lyrics archive is missing the engine license"
+    );
+    Ok(())
 }
 
 /// Invalidates a timing if the lyrics text or the alignment implementation changes.

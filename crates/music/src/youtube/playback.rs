@@ -330,9 +330,11 @@ async fn attempt_open(
     shelf: Option<&Shelf>,
 ) -> Result<Loaded> {
     let started = Instant::now();
+    let metadata_started = Instant::now();
     let (format, audio) = tokio::time::timeout(PATIENCE, api.open_audio_within(id, ceiling))
         .await
         .context("stream metadata timed out")??;
+    let metadata_elapsed = metadata_started.elapsed();
     let total = audio.total();
     let audio = match shelf {
         Some(shelf) => {
@@ -351,18 +353,22 @@ async fn attempt_open(
         }
         None => Recording::through(audio),
     };
+    let preroll_started = Instant::now();
     let stream = tokio::time::timeout(PATIENCE, Stream::pulling(audio, total, Plain).primed())
         .await
         .context("stream preroll timed out")??;
+    let preroll_elapsed = preroll_started.elapsed();
     let (segments, edit) = front(&stream);
     log::debug!(
-        "playback: {id} started, itag {} {} {} kbps, {:.1} MiB, {} segments, in {:?}",
+        "playback: {id} started, itag {} {} {} kbps, {:.1} MiB, {} segments, in {:?} (metadata {:?}, audio preroll {:?})",
         format.itag,
         format.codec,
         format.bitrate / 1000,
         total.unwrap_or_default() as f64 / (1024.0 * 1024.0),
         segments.as_ref().map_or(0, Segments::count),
-        started.elapsed()
+        started.elapsed(),
+        metadata_elapsed,
+        preroll_elapsed,
     );
     match edit {
         Some(edit) => log::debug!(

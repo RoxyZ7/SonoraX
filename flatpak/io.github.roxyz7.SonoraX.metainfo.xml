@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.nolight132.sonora</id>
+  <id>io.github.roxyz7.SonoraX</id>
 
-  <name>Sonora</name>
-  <developer id="io.github.nolight132">
-    <name>nolight132</name>
+  <name>SonoraX</name>
+  <developer id="io.github.roxyz7">
+    <name>RoxyZ7</name>
   </developer>
   <keywords>
     <keyword>music</keyword>
@@ -16,7 +16,7 @@
 
   <metadata_license>MIT</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-  <url type="homepage">https://github.com/sonorahq/sonora</url>
+  <url type="homepage">https://github.com/RoxyZ7/SonoraX</url>
 
   <supports>
     <control>pointing</control>
@@ -26,7 +26,7 @@
 
   <description>
     <p>
-      Sonora streams Spotify and YouTube Music and plays your local files from one native
+      SonoraX streams Spotify and YouTube Music and plays your local files from one native
       desktop app built with Rust and GPUI, with lyrics, artist pages, playlists, and
       system media controls.
     </p>
@@ -53,7 +53,7 @@
     <release version="@VERSION@" date="@DATE@" />
   </releases>
 
-  <launchable type="desktop-id">io.github.nolight132.sonora.desktop</launchable>
+  <launchable type="desktop-id">io.github.roxyz7.SonoraX.desktop</launchable>
 
   <screenshots>
     <screenshot type="default">

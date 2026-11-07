@@ -6,7 +6,7 @@
 #define OutputDir GetEnv("SONORA_DIST")
 ; x64compatible for the x64 build, arm64 for the ARM one
 #define Arch GetEnv("SONORA_ARCH")
-; Sonora-Setup for the x64 build, Sonora-Setup-arm64 for the ARM one
+; SonoraX-Setup for the x64 build, SonoraX-Setup-arm64 for the ARM one
 #define SetupName GetEnv("SONORA_SETUP")
 
 [Setup]
@@ -42,7 +42,7 @@ Source: "..\..\THIRD-PARTY.md"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon; Check: not SilentUpgrade
 
-; Lists Sonora in "Open With" and in Settings > Apps > Default apps for the file types
+; Lists SonoraX in "Open With" and in Settings > Apps > Default apps for the file types
 ; it plays, without automatically becoming the default handler for any of them.
 ; MultiSelectModel=Player is the key Explorer honors to invoke the app once
 ; with every selected file passed as its own argument, instead of once per file.
@@ -215,7 +215,7 @@ Root: HKA; Subkey: "Software\Classes\SonoraX.ape\DefaultIcon"; ValueType: string
 Root: HKA; Subkey: "Software\Classes\SonoraX.ape\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExeName}\SupportedTypes"; ValueType: string; ValueName: ".ape"; ValueData: ""; Flags: uninsdeletevalue
 Root: HKA; Subkey: "Software\SonoraX\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ape"; ValueData: "SonoraX.ape"; Flags: uninsdeletevalue
-; sonora, which no other app claims, so Sonora owns the scheme outright
+; sonorax, which no other app claims, so SonoraX owns the scheme outright
 Root: HKA; Subkey: "Software\Classes\sonorax"; ValueType: string; ValueName: ""; ValueData: "URL:SonoraX Link"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\sonorax"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
 Root: HKA; Subkey: "Software\Classes\sonorax\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"
@@ -241,7 +241,7 @@ Root: HKA; Subkey: "Software\Classes\SonoraXTidal\shell\open\command"; ValueType
 
 ; Setup runs elevated, and a [Run] entry inherits that unless it says otherwise: postinstall
 ; entries default to runasoriginaluser, the relaunch after a silent update does not, and an
-; elevated Sonora is out of reach for tools like FancyZones that manage windows unelevated.
+; elevated SonoraX is out of reach for tools like FancyZones that manage windows unelevated.
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
 Filename: "{app}\{#AppExeName}"; Flags: nowait runasoriginaluser; Check: RelaunchRequested

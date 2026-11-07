@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.48.4] - 2026-11-07
+
+### Added
+
+- Generate synced lyrics automatically when a track has lyrics without timing, using an optional
+  one-time download of the SonoraX lyrics engine and model for Windows, Linux and macOS.
+- Publish SonoraX-branded Windows, Linux and macOS stable and Nightly builds from this repository.
+
+### Fixed
+
+- The Nightly update channel now checks the Nightly release instead of Stable.
+- Separate YouTube Music metadata and audio pre-roll timings in playback logs to help diagnose slow starts.
+- Show SonoraX consistently in the interface, installers, launchers and release assets.
+
 ## [0.48.0] - 2026-11-07
 
 ### Added

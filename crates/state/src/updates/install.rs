@@ -17,7 +17,7 @@ const PORTABLE: &str = match cfg!(target_arch = "aarch64") {
     false => "SonoraX-x86_64-pc-windows-msvc.exe",
 };
 /// Where Homebrew keeps the stable and the nightly cask, on Apple silicon and on Intel. Any of
-/// them existing means Homebrew owns /Applications/Sonora.app, though not a copy installed
+/// them existing means Homebrew owns /Applications/SonoraX.app, though not a copy installed
 /// anywhere else.
 #[cfg(target_os = "macos")]
 const CASKROOMS: [&str; 4] = [
@@ -35,18 +35,18 @@ pub(super) enum Install {
     Setup,
     #[cfg(target_os = "windows")]
     Portable(std::path::PathBuf),
-    /// An app bundle Sonora can write beside, outside Homebrew and the Nix store.
+    /// An app bundle SonoraX can write beside, outside Homebrew and the Nix store.
     #[cfg(target_os = "macos")]
     Bundle(std::path::PathBuf),
     /// An AppImage, replaced file for file.
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     AppImage(std::path::PathBuf),
-    /// A package manager or a portable copy, either of which Sonora leaves alone.
+    /// A package manager or a portable copy, either of which SonoraX leaves alone.
     Managed,
 }
 
 impl Install {
-    /// Works out how Sonora was installed, once per run.
+    /// Works out how SonoraX was installed, once per run.
     pub(super) fn current() -> &'static Self {
         static CURRENT: OnceLock<Install> = OnceLock::new();
         CURRENT.get_or_init(detect)
@@ -84,7 +84,7 @@ impl Install {
             Self::Bundle(bundle) => swap_bundle(download, bundle),
             #[cfg(not(any(target_os = "windows", target_os = "macos")))]
             Self::AppImage(image) => swap_image(download, image),
-            Self::Managed => anyhow::bail!("a package manager updates this copy of sonora"),
+            Self::Managed => anyhow::bail!("a package manager updates this copy of SonoraX"),
         }
     }
 }
@@ -146,7 +146,7 @@ fn quote_path(path: &Path) -> String {
     path.to_string_lossy().replace('\'', "''")
 }
 
-/// A bundle counts when Sonora runs from its own `.app` in a folder it can write to. Homebrew's,
+/// A bundle counts when SonoraX runs from its own `.app` in a folder it can write to. Homebrew's,
 /// one in the Nix store, one still on the disk image and one macOS translocated are left alone.
 #[cfg(target_os = "macos")]
 fn detect() -> Install {
@@ -215,7 +215,7 @@ fn writable(folder: &Path) -> bool {
     }
 }
 
-/// Runs the Inno Setup installer silently. It waits for Sonora to quit, upgrades it and starts
+/// Runs the Inno Setup installer silently. It waits for SonoraX to quit, upgrades it and starts
 /// it again.
 #[cfg(target_os = "windows")]
 fn setup(installer: &Path) -> Result<()> {
@@ -226,7 +226,7 @@ fn setup(installer: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Copies Sonora.app off the disk image beside the running bundle, deletes the image, then
+/// Copies SonoraX.app off the disk image beside the running bundle, deletes the image, then
 /// trades the two bundles by renaming, so a failure part way leaves the old one where it was.
 #[cfg(target_os = "macos")]
 fn swap_bundle(image: &Path, bundle: &Path) -> Result<()> {
@@ -243,10 +243,10 @@ fn swap_bundle(image: &Path, bundle: &Path) -> Result<()> {
         .arg(image))
     .context("cannot open the disk image")?;
 
-    let staged = bundle.with_file_name(".Sonora.app.update");
+    let staged = bundle.with_file_name(".SonoraX.app.update");
     let copied = remove(&staged).and_then(|()| {
         run(Command::new("/usr/bin/ditto")
-            .arg(mount.path().join("Sonora.app"))
+            .arg(mount.path().join("SonoraX.app"))
             .arg(&staged))
         .context("cannot copy the new version off the disk image")
     });
@@ -259,7 +259,7 @@ fn swap_bundle(image: &Path, bundle: &Path) -> Result<()> {
     copied?;
     std::fs::remove_file(image).ok();
 
-    let retired = bundle.with_file_name(".Sonora.app.old");
+    let retired = bundle.with_file_name(".SonoraX.app.old");
     remove(&retired)?;
     std::fs::rename(bundle, &retired).context("cannot move the old version aside")?;
     if let Err(error) = std::fs::rename(&staged, bundle) {

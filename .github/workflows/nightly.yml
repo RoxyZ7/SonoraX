@@ -17,7 +17,7 @@ jobs:
   # nightly was built from. A manual run always builds. Either way the build is main, never another
   # branch.
   gate:
-    if: github.repository == 'sonorahq/sonora' && github.ref == 'refs/heads/main'
+    if: github.repository == 'RoxyZ7/SonoraX' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       number: ${{ steps.decide.outputs.number }}
@@ -75,7 +75,7 @@ jobs:
   # public half is registered on the AUR account that maintains the package.
   aur:
     needs: [gate, build]
-    if: needs.gate.outputs.aur == 'true'
+    if: ${{ needs.gate.outputs.aur == 'true' && vars.PUBLISH_AUR == 'true' }}
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     defaults:
@@ -96,8 +96,8 @@ jobs:
           curl -fsSL "$base/releases/download/nightly/SHA256SUMS" > sums
           sum() { awk -v file="$1" '$2 == file { print $1 }' sums; }
           source="$(curl -fsSL "$base/archive/$GITHUB_SHA.tar.gz" | sha256sum | cut -d ' ' -f 1)"
-          x86_64="$(sum sonora-nightly-x86_64-unknown-linux-gnu)"
-          aarch64="$(sum sonora-nightly-aarch64-unknown-linux-gnu)"
+          x86_64="$(sum SonoraX-nightly-x86_64-unknown-linux-gnu)"
+          aarch64="$(sum SonoraX-nightly-aarch64-unknown-linux-gnu)"
           test -n "$x86_64"
           test -n "$aarch64"
 
@@ -152,7 +152,7 @@ jobs:
   # write access to the tap.
   tap:
     needs: [gate, build]
-    if: needs.gate.outputs.tap == 'true'
+    if: ${{ needs.gate.outputs.tap == 'true' && vars.PUBLISH_HOMEBREW_CASK == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: point the cask at the nightly
@@ -162,7 +162,7 @@ jobs:
         run: |
           set -euo pipefail
           sum="$(curl -fsSL "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/nightly/SHA256SUMS" \
-            | awk '$2 == "sonora-nightly-macos.dmg" { print $1 }')"
+            | awk '$2 == "SonoraX-nightly-macos.dmg" { print $1 }')"
           test -n "$sum"
 
           install -d -m 700 ~/.ssh

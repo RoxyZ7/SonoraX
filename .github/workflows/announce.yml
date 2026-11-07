@@ -19,6 +19,7 @@ permissions:
 jobs:
   announce:
     runs-on: ubuntu-latest
+    if: ${{ vars.PUBLISH_DISCORD_ANNOUNCEMENT == 'true' }}
 
     steps:
       - uses: actions/checkout@v5
@@ -42,9 +43,9 @@ jobs:
             --arg repo "$REPO" \
             --arg notes "$notes" \
             '{
-              username: "Sonora Releases",
+              username: "SonoraX Releases",
               embeds: [{
-                title: ("Sonora " + $tag),
+                title: ("SonoraX " + $tag),
                 url: ("https://github.com/" + $repo + "/releases/tag/" + $tag),
                 description: (
                   if ($notes | length) > 4000 then

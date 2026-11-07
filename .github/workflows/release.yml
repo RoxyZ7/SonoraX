@@ -42,13 +42,21 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             arch: x64compatible
-            setup: Sonora-Setup
+            setup: SonoraX-Setup
           - target: aarch64-pc-windows-msvc
             os: windows-11-arm
             arch: arm64
-            setup: Sonora-Setup-arm64
+            setup: SonoraX-Setup-arm64
     steps:
       - uses: actions/checkout@v5
+
+      - name: fetch the lyrics engine source
+        uses: actions/checkout@v5
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: v1.9.2
+          path: work/whisper.cpp
+          persist-credentials: false
 
       - name: name the artifact
         id: meta
@@ -96,6 +104,28 @@ jobs:
           if [ -n "$NIGHTLY" ]; then export SONORA_VERSION="$NIGHTLY"; fi
           cargo build --release --locked --package sonora --target "$TARGET"
 
+      - name: build the lyrics engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S work/whisper.cpp -B work/whisper.cpp/build \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGGML_NATIVE=OFF \
+            -DWHISPER_BUILD_TESTS=OFF \
+            -DWHISPER_BUILD_EXAMPLES=ON \
+            -DWHISPER_BUILD_SERVER=OFF
+          cmake --build work/whisper.cpp/build --config Release --target whisper-cli --parallel 2
+          mkdir -p dist/lyrics-engine
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            cp work/whisper.cpp/build/bin/Release/whisper-cli.exe dist/lyrics-engine/whisper-cli.exe
+          else
+            cp work/whisper.cpp/build/bin/whisper-cli dist/lyrics-engine/whisper-cli
+            chmod +x dist/lyrics-engine/whisper-cli
+          fi
+          cp work/whisper.cpp/LICENSE dist/lyrics-engine/LICENSE.whisper.cpp
+          tar -czf "dist/SonoraX-lyrics-engine-$TARGET.tar.gz" -C dist/lyrics-engine .
+          rm -rf dist/lyrics-engine
+
       - name: sccache stats
         if: always()
         run: sccache --show-stats
@@ -111,19 +141,19 @@ jobs:
             macOS)
               cp \
                 "target/$TARGET/release/sonora" \
-                "dist/sonora-$TARGET"
+                "dist/SonoraX-$TARGET"
               ;;
 
             Windows)
               cp \
                 "target/$TARGET/release/sonora.exe" \
-                "dist/sonora-$VERSION-$TARGET.exe"
+                "dist/SonoraX-$TARGET.exe"
               ;;
 
             *)
               cp \
                 "target/$TARGET/release/sonora" \
-                "dist/sonora-$VERSION-$TARGET"
+                "dist/SonoraX-$VERSION-$TARGET"
               ;;
           esac
 
@@ -155,6 +185,13 @@ jobs:
         with:
           name: "${{ runner.os == 'macOS' && format('darwin-{0}', matrix.target) || format('release-{0}', matrix.target) }}"
           path: dist/*
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
+        with:
+          name: release-engine-${{ matrix.target }}
+          path: dist/SonoraX-lyrics-engine-${{ matrix.target }}.tar.gz
           if-no-files-found: error
 
   bundle:
@@ -203,45 +240,45 @@ jobs:
           set -euo pipefail
 
           mkdir -p \
-            Sonora.app/Contents/MacOS \
-            Sonora.app/Contents/Resources
+            SonoraX.app/Contents/MacOS \
+            SonoraX.app/Contents/Resources
 
           lipo -create \
-            -output Sonora.app/Contents/MacOS/sonora \
-            darwin/sonora-aarch64-apple-darwin \
-            darwin/sonora-x86_64-apple-darwin
-          chmod +x Sonora.app/Contents/MacOS/sonora
-          lipo -info Sonora.app/Contents/MacOS/sonora
+            -output SonoraX.app/Contents/MacOS/sonora \
+            darwin/SonoraX-aarch64-apple-darwin \
+            darwin/SonoraX-x86_64-apple-darwin
+          chmod +x SonoraX.app/Contents/MacOS/sonora
+          lipo -info SonoraX.app/Contents/MacOS/sonora
 
           cp \
             assets/macos/sonora.icns \
-            Sonora.app/Contents/Resources/
+            SonoraX.app/Contents/Resources/
 
           cp \
             COPYING \
-            Sonora.app/Contents/Resources/LICENSE
+            SonoraX.app/Contents/Resources/LICENSE
 
           cp \
             THIRD-PARTY.md \
-            Sonora.app/Contents/Resources/
+            SonoraX.app/Contents/Resources/
 
           cp \
             assets/fonts/LICENSE.txt \
-            Sonora.app/Contents/Resources/LICENSE.Inter
+            SonoraX.app/Contents/Resources/LICENSE.Inter
 
-          mkdir -p Sonora.app/Contents/Resources/icons
-          cp assets/icons/LICENSE Sonora.app/Contents/Resources/icons/LICENSE
+          mkdir -p SonoraX.app/Contents/Resources/icons
+          cp assets/icons/LICENSE SonoraX.app/Contents/Resources/icons/LICENSE
           for licence in assets/icons/*/LICENSE; do
             pack="$(basename "$(dirname "$licence")")"
-            cp "$licence" "Sonora.app/Contents/Resources/icons/LICENSE.$pack"
+            cp "$licence" "SonoraX.app/Contents/Resources/icons/LICENSE.$pack"
           done
 
           sed \
             "s/@VERSION@/$NUMBER/g" \
             assets/macos/Info.plist \
-            > Sonora.app/Contents/Info.plist
+            > SonoraX.app/Contents/Info.plist
 
-          plutil -lint Sonora.app/Contents/Info.plist
+          plutil -lint SonoraX.app/Contents/Info.plist
 
       - name: sign the bundle
         shell: bash
@@ -251,13 +288,13 @@ jobs:
           codesign \
             --force \
             --sign - \
-            Sonora.app
+            SonoraX.app
 
           codesign \
             --verify \
             --strict \
             --verbose=2 \
-            Sonora.app
+            SonoraX.app
 
       - name: create the disk image
         shell: bash
@@ -266,16 +303,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist staging
-          cp -R Sonora.app staging/
+          cp -R SonoraX.app staging/
           ln -s /Applications staging/Applications
           megabytes=$(du -ms staging | cut -f1)
           hdiutil create \
-            -volname Sonora \
+            -volname SonoraX \
             -srcfolder staging \
             -size "$((megabytes + 128))m" \
             -ov \
             -format UDZO \
-            "dist/sonora-$VERSION-macos.dmg"
+            "dist/SonoraX-$VERSION-macos.dmg"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -333,12 +370,12 @@ jobs:
           update=""
           case "$number" in
             "" | *-*) ;;
-            *) update="$zsync|latest|sonora-*-$ARCH.AppImage.zsync" ;;
+            *) update="$zsync|latest|SonoraX-*$ARCH.AppImage.zsync" ;;
           esac
           if [ -n "$NIGHTLY" ]; then
             version=nightly
             number="$NIGHTLY"
-            update="$zsync|nightly|sonora-*-$ARCH.AppImage.zsync"
+            update="$zsync|nightly|SonoraX-*$ARCH.AppImage.zsync"
           fi
 
           {
@@ -383,7 +420,7 @@ jobs:
           set -euo pipefail
 
           mkdir -p AppDir/usr/bin
-          cp "staged/sonora-$VERSION-$TARGET" AppDir/usr/bin/sonora
+          cp "staged/SonoraX-$VERSION-$TARGET" AppDir/usr/bin/sonora
           chmod +x AppDir/usr/bin/sonora
 
           # Every asset is compiled into the executable, so the AppDir carries the desktop entry
@@ -397,7 +434,7 @@ jobs:
           mkdir -p desktop
           cp assets/linux/sonora.desktop desktop/sonora.desktop
           {
-            echo "X-AppImage-Name=Sonora"
+            echo "X-AppImage-Name=SonoraX"
             echo "X-AppImage-Arch=$ARCH"
             echo "X-AppImage-Homepage=$homepage"
             if [ -n "$NUMBER" ]; then echo "X-AppImage-Version=$NUMBER"; fi
@@ -436,7 +473,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          image="sonora-$VERSION-$ARCH.AppImage"
+          image="SonoraX-$VERSION-$ARCH.AppImage"
 
           # Given update information, appimagetool embeds it and writes the .zsync that
           # AppImageUpdate diffs against beside the image, with a zsyncmake of its own.
@@ -455,7 +492,7 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          image="sonora-$VERSION-$ARCH.AppImage"
+          image="SonoraX-$VERSION-$ARCH.AppImage"
           "./$image" --appimage-extract > /dev/null
           test -x squashfs-root/usr/bin/sonora
           test -f squashfs-root/sonora.desktop
@@ -530,14 +567,14 @@ jobs:
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           manifest-path: flatpak/flatpak-builder.yaml
-          bundle: sonora-${{ steps.meta.outputs.version }}-${{ matrix.variant.arch }}.flatpak
+          bundle: SonoraX-${{ steps.meta.outputs.version }}-${{ matrix.variant.arch }}.flatpak
           arch: ${{ matrix.variant.arch }}
           upload-artifact: true
           artifact-name: flatpak-${{ matrix.variant.arch }}
 
   flatpak-repo:
     needs: flatpak
-    if: startsWith(github.ref, 'refs/tags/')
+    if: ${{ startsWith(github.ref, 'refs/tags/') && vars.PUBLISH_FLATPAK_REPO == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -591,7 +628,7 @@ jobs:
               site/repo "$bundle"
           done
           flatpak build-update-repo \
-            --title=Sonora \
+            --title=SonoraX \
             --generate-static-deltas \
             --prune \
             --prune-depth=3 \
@@ -628,8 +665,8 @@ jobs:
           git push --force "https://x-access-token:$TOKEN@github.com/$GITHUB_REPOSITORY" flatpak-repo
 
   release:
-    needs: [build, bundle, appimage, flatpak, flatpak-repo]
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build, bundle, appimage, flatpak]
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/') && needs.build.result == 'success' && needs.bundle.result == 'success' && needs.appimage.result == 'success' && needs.flatpak.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -645,7 +682,7 @@ jobs:
       - name: stage the licenses
         env:
           VERSION: ${{ github.ref_name }}
-        run: ./scripts/licenses-tarball.sh "dist/sonora-$VERSION-licenses.tar.gz"
+        run: ./scripts/licenses-tarball.sh "dist/SonoraX-$VERSION-licenses.tar.gz"
 
       - name: checksums
         run: cd dist && shasum -a 256 * > SHA256SUMS
@@ -686,7 +723,7 @@ jobs:
           merge-multiple: true
 
       - name: stage the licenses
-        run: ./scripts/licenses-tarball.sh dist/sonora-nightly-licenses.tar.gz
+        run: ./scripts/licenses-tarball.sh dist/SonoraX-nightly-licenses.tar.gz
 
       - name: checksums
         run: cd dist && shasum -a 256 * > SHA256SUMS
@@ -699,9 +736,9 @@ jobs:
           sri() { echo "sha256-$(openssl dgst -sha256 -binary "dist/$1" | base64 -w0)"; }
           jq -n \
             --arg version "$NIGHTLY" \
-            --arg x86_64_linux "$(sri sonora-nightly-x86_64-unknown-linux-gnu)" \
-            --arg aarch64_linux "$(sri sonora-nightly-aarch64-unknown-linux-gnu)" \
-            --arg aarch64_darwin "$(sri sonora-nightly-macos.dmg)" \
+            --arg x86_64_linux "$(sri SonoraX-nightly-x86_64-unknown-linux-gnu)" \
+            --arg aarch64_linux "$(sri SonoraX-nightly-aarch64-unknown-linux-gnu)" \
+            --arg aarch64_darwin "$(sri SonoraX-nightly-macos.dmg)" \
             '{
               version: $version,
               tag: "nightly",
@@ -735,7 +772,7 @@ jobs:
           set -euo pipefail
           commit="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA"
           {
-            printf 'Sonora %s, built from [`%s`](%s) on `main`.\n\n' "$NIGHTLY" "${GITHUB_SHA:0:7}" "$commit"
+            printf 'SonoraX %s, built from [`%s`](%s) on `main`.\n\n' "$NIGHTLY" "${GITHUB_SHA:0:7}" "$commit"
             printf 'A nightly build has not been through the testing a release gets. '
             printf 'Report what breaks in the issues and mention that it is the nightly.\n'
           } > notes.md
@@ -778,7 +815,7 @@ jobs:
   # pushes sonora-nightly-bin with, since one AUR account maintains both.
   aur:
     needs: release
-    if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
+    if: ${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') && vars.PUBLISH_AUR == 'true' }}
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     defaults:
@@ -799,8 +836,8 @@ jobs:
           curl -fsSL "$base/releases/download/$TAG/SHA256SUMS" > sums
           sum() { awk -v file="$1" '$2 == file { print $1 }' sums; }
           source="$(curl -fsSL "$base/archive/refs/tags/$TAG.tar.gz" | sha256sum | cut -d ' ' -f 1)"
-          x86_64="$(sum "sonora-$TAG-x86_64-unknown-linux-gnu")"
-          aarch64="$(sum "sonora-$TAG-aarch64-unknown-linux-gnu")"
+          x86_64="$(sum "SonoraX-$TAG-x86_64-unknown-linux-gnu")"
+          aarch64="$(sum "SonoraX-$TAG-aarch64-unknown-linux-gnu")"
           test -n "$x86_64"
           test -n "$aarch64"
 
