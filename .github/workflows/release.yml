@@ -110,7 +110,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake -S work/whisper.cpp -B work/whisper.cpp/build \
+          cmake_args=()
+          if [[ "$RUNNER_OS" == Windows && "$TARGET" == aarch64-pc-windows-msvc ]]; then
+            cmake_args=(-T ClangCL)
+          fi
+          cmake -S work/whisper.cpp -B work/whisper.cpp/build "${cmake_args[@]}" \
             -DBUILD_SHARED_LIBS=OFF \
             -DGGML_NATIVE=OFF \
             -DWHISPER_BUILD_TESTS=OFF \
