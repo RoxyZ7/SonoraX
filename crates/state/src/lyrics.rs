@@ -1,14 +1,18 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
+use std::io::Read as _;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui::{Context, Entity, Task};
+use gpui::{AppContext as _, Context, Entity, PathPromptOptions, Task};
 use music::lyrics::LOCAL;
 use music::{LyricsHit, LyricsProvider, LyricsQuery, Track, TrackKey};
+use rusqlite::OptionalExtension as _;
 use tokio::task::JoinSet;
 
+use crate::lyrics_auto;
 use crate::sheets::{Sheets, Unsaved};
-use crate::{AppSettings, Io, Playback, Queue, QueuePosition, Session, join};
+use crate::{AppSettings, Io, Outcome, Playback, Queue, QueuePosition, Session, Toasts, join};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LyricsState {
@@ -21,6 +25,7 @@ pub enum LyricsState {
 }
 
 const SAVE_DELAY: Duration = Duration::from_millis(800);
+const MAX_LRC_BYTES: u64 = 1024 * 1024;
 
 /// How many tracks keep their answer in memory. The rest are read back from the cache database,
 /// so this only has to cover the track playing, the next one and a few just played.
@@ -37,6 +42,13 @@ pub struct Lyrics {
     /// The answers looked at most recently, newest first.
     recent: VecDeque<(String, Found)>,
     store: Sheets,
+    overrides: storage::Database,
+    attached: bool,
+    edit: Option<Task<()>>,
+    auto: Option<Task<()>>,
+    auto_for: Option<String>,
+    auto_checked: bool,
+    attempted_auto: HashSet<(String, String)>,
     /// Answers found since the last save, written together once lookups go quiet.
     unsaved: Vec<Unsaved>,
     providers: Vec<Arc<dyn LyricsProvider>>,
@@ -105,6 +117,13 @@ impl Lyrics {
             following: None,
             recent: VecDeque::new(),
             store,
+            overrides: storage::Database::standard(),
+            attached: false,
+            edit: None,
+            auto: None,
+            auto_for: None,
+            auto_checked: false,
+            attempted_auto: HashSet::new(),
             unsaved: Vec::new(),
             providers,
             enabled_providers,
@@ -127,6 +146,109 @@ impl Lyrics {
 
     pub fn following(&self) -> Option<&str> {
         self.following.as_deref()
+    }
+
+    pub fn has_attachment(&self) -> bool {
+        self.attached
+    }
+
+    pub fn editing_attachment(&self) -> bool {
+        self.edit.is_some()
+    }
+
+    pub fn generating(&self) -> bool {
+        self.auto_for.is_some() && self.auto_for == self.following
+    }
+
+    /// Applies an attachment to the track selected when the action began, even if it ends
+    /// while the file dialog is open.
+    pub fn edit_attachment(&mut self, remove: bool, cx: &mut Context<Self>) {
+        let Some(id) = self.following.as_deref() else {
+            return;
+        };
+        if self.edit.is_some() || (remove && !self.attached) {
+            return;
+        }
+        let key = self.key(id, cx);
+        let db = self.overrides.clone();
+        let picker = (!remove).then(|| {
+            cx.prompt_for_paths(PathPromptOptions {
+                files: true,
+                directories: false,
+                multiple: false,
+                prompt: None,
+            })
+        });
+        self.edit = Some(cx.spawn(async move |this, cx| {
+            let result = async {
+                let path = match picker {
+                    Some(picker) => match picker.await??.and_then(|paths| paths.into_iter().next())
+                    {
+                        Some(path) => Some(path),
+                        None => return Ok(false),
+                    },
+                    None => None,
+                };
+                let key = key.clone();
+                cx.background_spawn(async move {
+                    let connection = db.open()?;
+                    if let Some(path) = path {
+                        let lrc = read_attachment(&path)?;
+                        connection.execute(
+                            "INSERT INTO lyrics_overrides (track_key, lrc) VALUES (?1, ?2)
+                             ON CONFLICT(track_key) DO UPDATE SET lrc = excluded.lrc",
+                            (&key, lrc),
+                        )?;
+                    } else {
+                        connection
+                            .execute("DELETE FROM lyrics_overrides WHERE track_key = ?1", [&key])?;
+                    }
+                    Ok::<_, anyhow::Error>(true)
+                })
+                .await
+            }
+            .await;
+            this.update(cx, |this, cx| {
+                this.edit = None;
+                match result {
+                    Ok(true) => {
+                        if this
+                            .following
+                            .as_deref()
+                            .is_some_and(|id| this.key(id, cx) == key)
+                        {
+                            this.forget(cx);
+                            this.follow(cx);
+                        }
+                        Toasts::show(
+                            Outcome::Done,
+                            if remove {
+                                "lyrics-file-removed"
+                            } else {
+                                "lyrics-file-saved"
+                            },
+                            cx,
+                        );
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        log::warn!("lyrics: cannot edit attachment: {error:#}");
+                        Toasts::show(
+                            Outcome::Failed,
+                            if remove {
+                                "lyrics-file-remove-failed"
+                            } else {
+                                "lyrics-file-import-failed"
+                            },
+                            cx,
+                        );
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
     }
 
     pub fn hits(&self) -> &[LyricsHit] {
@@ -173,11 +295,64 @@ impl Lyrics {
         }
         let (track, id) = (track.clone(), id.to_owned());
         self.following = Some(id.clone());
+        self.auto_checked = false;
         self.chosen = 0;
         self.picked = false;
         self.settled = false;
+        self.attached = false;
         self.revision = self.revision.wrapping_add(1);
+        self.hits.clear();
+        self.state = LyricsState::Loading;
+        if self.ahead_of.as_deref() == Some(&id) {
+            self.ahead = None;
+            self.ahead_of = None;
+        }
+        let db = self.overrides.clone();
+        let key = self.key(&id, cx);
+        self.task = Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let connection = db.open()?;
+                    let lrc: Option<String> = connection
+                        .query_row(
+                            "SELECT lrc FROM lyrics_overrides WHERE track_key = ?1",
+                            [&key],
+                            |row| row.get(0),
+                        )
+                        .optional()?;
+                    Ok::<_, anyhow::Error>(lrc.as_deref().and_then(attachment_lyrics))
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                if !this.finished(&id) {
+                    return;
+                }
+                match result {
+                    Ok(Some(lyrics)) => {
+                        this.attached = true;
+                        this.settled = true;
+                        this.hits = vec![LyricsHit {
+                            source: "LRC",
+                            lyrics,
+                            ..LyricsHit::default()
+                        }];
+                        this.state = LyricsState::Ready;
+                        cx.notify();
+                    }
+                    result => {
+                        if let Err(error) = result {
+                            log::warn!("lyrics: cannot read attachment: {error:#}");
+                        }
+                        this.follow_providers(id, track, cx);
+                    }
+                }
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
 
+    fn follow_providers(&mut self, id: String, track: Track, cx: &mut Context<Self>) {
         // A file's own lyrics are never cached, so an edit to its tags shows on the next play.
         if !self.reads_file(&id, cx)
             && let Some(found) = self.recall(&id)
@@ -210,6 +385,108 @@ impl Lyrics {
         self.state = state_for(&self.hits, instrumental);
         cx.notify();
         self.prefetch(cx);
+        self.maybe_auto(cx);
+    }
+
+    /// Fills in timings only after the regular sources have settled on plain lyrics.
+    fn maybe_auto(&mut self, cx: &mut Context<Self>) {
+        if self.auto.is_some()
+            || self.auto_checked
+            || self.picked
+            || self.hits.iter().any(|hit| hit.lyrics.synced())
+        {
+            return;
+        }
+        let Some(id) = self.following.clone() else {
+            return;
+        };
+        if self.session.read(cx).slug_for(&id) != Some("youtube") {
+            return;
+        }
+        let Some(hit) = self.current().cloned() else {
+            return;
+        };
+        let music::Lyrics::Plain { text, .. } = &hit.lyrics else {
+            return;
+        };
+        let count = text.lines().filter(|line| !line.trim().is_empty()).count();
+        if !(4..=240).contains(&count) || text.lines().any(|line| line.chars().count() > 300) {
+            return;
+        }
+        self.auto_checked = true;
+        let text = text.clone();
+        let key = self.key(&id, cx);
+        let version = lyrics_auto::fingerprint(&text);
+        let engine = lyrics_auto::engine();
+        let client = self.session.read(cx).client();
+        let online = !crate::Network::offline(cx);
+        let generate = engine.is_some()
+            && client.is_some()
+            && online
+            && self.attempted_auto.insert((key.clone(), version.clone()));
+        let player = self.playback.read(cx);
+        let quality = player.quality();
+        let vault = player.vault().clone();
+        let db = self.overrides.clone();
+        let for_audio = id.clone();
+        if generate {
+            self.auto_for = Some(id.clone());
+        }
+        self.auto = Some(self.io.load(
+            async move {
+                let (db, key, version, cached) = tokio::task::spawn_blocking(move || {
+                    let lrc = lyrics_auto::cached(&db, &key, &version)?;
+                    Ok::<_, anyhow::Error>((db, key, version, lrc))
+                })
+                .await??;
+                if let Some(lrc) = cached {
+                    return Ok(attachment_lyrics(&lrc));
+                }
+                let (Some(engine), Some(client), true) = (engine, client, generate) else {
+                    return Ok(None);
+                };
+                let Some(pcm) = client.lyrics_audio(&for_audio, quality, &vault).await? else {
+                    return Ok(None);
+                };
+                tokio::task::spawn_blocking(move || {
+                    let Some(lrc) = lyrics_auto::generate(&engine, &pcm, &text)? else {
+                        return Ok(None);
+                    };
+                    lyrics_auto::save(&db, &key, &version, &lrc)?;
+                    Ok(attachment_lyrics(&lrc))
+                })
+                .await?
+            },
+            move |this, result: anyhow::Result<Option<music::Lyrics>>, cx| {
+                this.auto = None;
+                this.auto_for = None;
+                match result {
+                    Ok(Some(lyrics))
+                        if this.following.as_deref() == Some(id.as_str())
+                            && !this.picked
+                            && this.current() == Some(&hit)
+                            && !this.hits.iter().any(|hit| hit.lyrics.synced()) =>
+                    {
+                        this.hits.insert(
+                            0,
+                            LyricsHit {
+                                source: lyrics_auto::SOURCE,
+                                lyrics,
+                                ..hit
+                            },
+                        );
+                        this.chosen = 0;
+                        this.revision = this.revision.wrapping_add(1);
+                    }
+                    Err(error) => log::debug!("lyrics: automatic alignment unavailable: {error:#}"),
+                    _ => {}
+                }
+                cx.notify();
+                this.maybe_auto(cx);
+            },
+            cx,
+        ));
+        cx.notify();
     }
 
     /// The answer held in memory for `id`, which becomes the most recently used.
@@ -315,6 +592,7 @@ impl Lyrics {
         self.chosen = 0;
         self.picked = false;
         self.settled = false;
+        self.attached = false;
         self.revision = self.revision.wrapping_add(1);
         self.state = LyricsState::Idle;
         cx.notify();
@@ -594,6 +872,7 @@ impl Lyrics {
         }
         cx.notify();
         self.prefetch(cx);
+        self.maybe_auto(cx);
     }
 
     fn pin(&mut self, ranked: Vec<LyricsHit>, displayed: Option<&LyricsHit>) {
@@ -627,6 +906,35 @@ impl Lyrics {
                 .detach();
         }));
     }
+}
+
+/// Reads a bounded UTF-8 LRC and rejects files without a timed lyric.
+fn read_attachment(path: &Path) -> anyhow::Result<String> {
+    anyhow::ensure!(
+        path.extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("lrc")),
+        "expected an LRC file"
+    );
+    let mut text = String::new();
+    std::fs::File::open(path)?
+        .take(MAX_LRC_BYTES + 1)
+        .read_to_string(&mut text)?;
+    anyhow::ensure!(text.len() as u64 <= MAX_LRC_BYTES, "LRC file is too large");
+    anyhow::ensure!(
+        attachment_lyrics(&text).is_some(),
+        "LRC has no timed lyrics"
+    );
+    Ok(text)
+}
+
+fn attachment_lyrics(text: &str) -> Option<music::Lyrics> {
+    let lines = music::lyrics::lrc::parse(text.trim_start_matches('\u{feff}'));
+    lines
+        .iter()
+        .any(|line| !line.text.trim().is_empty())
+        .then(|| music::Lyrics::Synced {
+            lines: lines.into(),
+        })
 }
 
 fn keep_displayed_first(hits: &mut Vec<LyricsHit>, displayed: Option<&LyricsHit>) -> bool {

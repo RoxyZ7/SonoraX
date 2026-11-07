@@ -33,7 +33,7 @@ const SLEEP_LAST: usize = (SLEEP_MAX_MINUTES - SLEEP_MIN_MINUTES + 1) as usize
 impl SettingsView {
     pub(super) fn playback_groups(&self, cx: &App) -> Vec<Group> {
         let capabilities = self.session.read(cx).capabilities();
-        let mut playing = vec![Slot::Normalisation, Slot::Gapless];
+        let mut playing = vec![Slot::Normalisation, Slot::Gapless, Slot::Crossfade];
         playing.extend([Slot::Sleep, Slot::StayAwake]);
         let mut groups = vec![Group::new("settings-group-playing", "icons/play.svg").rows(playing)];
         // one level is nothing to choose between, so it is stated in a row rather than offered
@@ -97,6 +97,29 @@ impl SettingsView {
                         .update(cx, |playback, cx| playback.set_gapless(!on, cx));
                 }))
                 .into_any_element(),
+        )
+    }
+
+    pub(super) fn crossfade_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let current = self.playback.read(cx).crossfade();
+        let choices = segmented(
+            "crossfade",
+            [0, 3, 5, 8].map(|seconds: u8| {
+                let label = match seconds {
+                    0 => t!("settings-crossfade-off"),
+                    _ => t!("settings-crossfade-seconds", seconds = u32::from(seconds)),
+                };
+                (seconds, label)
+            }),
+            current,
+            cx.listener(|this, seconds: &u8, _, cx| {
+                this.playback
+                    .update(cx, |playback, cx| playback.set_crossfade(*seconds, cx));
+            }),
+        );
+        self.row(
+            t!("settings-crossfade"),
+            choices.name(t!("settings-crossfade")).into_any_element(),
         )
     }
 

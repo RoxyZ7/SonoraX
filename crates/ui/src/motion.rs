@@ -8,13 +8,13 @@ use gpui::{
 use i18n::t;
 
 const CONTROL: Duration = Duration::from_millis(110);
-const QUICK: Duration = Duration::from_millis(120);
-const BASE: Duration = Duration::from_millis(200);
-const SLOW: Duration = Duration::from_millis(320);
+const QUICK: Duration = Duration::from_millis(130);
+const BASE: Duration = Duration::from_millis(220);
+const SLOW: Duration = Duration::from_millis(360);
 
-const ENTRANCE_EXTRA: Duration = Duration::from_millis(50);
-const ENTRANCE_BLUR: Pixels = px(1.5);
-const ENTRANCE_ZOOM: f32 = 0.01;
+const ENTRANCE_EXTRA: Duration = Duration::from_millis(40);
+const ENTRANCE_BLUR: Pixels = px(1.);
+const ENTRANCE_ZOOM: f32 = 0.008;
 
 /// Shared physical-motion presets. Call sites still own their stopping threshold and maximum
 /// timestep because those values depend on whether the spring moves pixels, opacity, or scale.
@@ -191,7 +191,7 @@ impl Entrance {
         }
         let elapsed = self.started.elapsed().as_secs_f32();
         let progress = (elapsed / self.span.as_secs_f32()).clamp(0., 1.);
-        1. - ease_out_expo(progress)
+        1. - ease_out_cubic(progress)
     }
 
     pub fn running(self) -> bool {
@@ -200,7 +200,7 @@ impl Entrance {
 }
 
 fn entrance() -> Animation {
-    Animation::new(entrance_span()).with_easing(ease_out_expo)
+    Animation::new(entrance_span()).with_easing(ease_out_cubic)
 }
 
 pub fn veiled<E: Styled>(element: E, hidden: f32) -> E {
@@ -434,6 +434,10 @@ impl HoverFade {
             since: None,
             span,
         }
+    }
+
+    pub(crate) fn is_set(&self) -> bool {
+        self.hovered
     }
 
     /// Turns the fade towards `hovered`, starting from wherever it stands now.

@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use gpui::accesskit::Toggled;
 use gpui::prelude::*;
-use gpui::{App, Entity, SharedString, div};
+use gpui::{AnimationExt as _, App, Entity, SharedString, div, svg};
 use i18n::t;
 use state::{Elsewhere, Playback, Repeat, Sonora};
-use ui::{ActiveTheme as _, Button};
+use ui::{ActiveTheme as _, Button, Motion};
 
 use crate::shared::ambient;
 
@@ -102,16 +102,71 @@ pub(crate) fn toggle(playback: &Entity<Playback>, big: bool, frosted: bool, cx: 
         false => ("play", "icons/play.svg", "play-resume"),
     };
 
-    Button::new(id)
+    let toggle = Button::new(if big { "fullscreen-play-pause" } else { id })
         .ghost()
         .when(frosted, Button::frosted)
         .when(!big, Button::small)
-        .icon(icon)
         .tooltip_above(tooltip)
         .disabled(idle)
         .on_click(move |_, _, cx| {
             playback.update(cx, |playback, cx| playback.toggle_play(cx));
-        })
+        });
+    match big {
+        true => toggle.leading(fullscreen_play_icon(playing, cx)),
+        false => toggle.icon(icon),
+    }
+}
+
+/// Trades the play and pause glyphs in a fixed slot so the controls stay in place.
+fn fullscreen_play_icon(playing: bool, cx: &App) -> impl IntoElement {
+    let theme = cx.theme();
+    let size = theme.metrics.control_small * 0.75;
+    let glyph = |path| {
+        svg()
+            .path(icons::path(path))
+            .size(size)
+            .text_color(theme.foreground)
+    };
+    let (incoming, outgoing) = match playing {
+        true => ("icons/pause.svg", "icons/play.svg"),
+        false => ("icons/play.svg", "icons/pause.svg"),
+    };
+    let slot = div().relative().size(size).flex_none();
+    if !ui::motion::animates(cx) {
+        return slot.child(glyph(incoming));
+    }
+    slot.child(
+        div()
+            .size_full()
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .child(glyph(outgoing))
+                    .with_animation(
+                        ("play-outgoing", playing as usize),
+                        Motion::Control.animation(),
+                        |layer, progress| {
+                            layer
+                                .opacity(1. - progress)
+                                .layer_scale(1. - 0.14 * progress)
+                        },
+                    ),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .child(glyph(incoming))
+                    .with_animation(
+                        ("play-incoming", playing as usize),
+                        Motion::Control.animation(),
+                        |layer, progress| {
+                            layer.opacity(progress).layer_scale(0.86 + 0.14 * progress)
+                        },
+                    ),
+            ),
+    )
 }
 
 fn shuffle(playback: &Entity<Playback>, frosted: bool, cx: &App) -> Button {

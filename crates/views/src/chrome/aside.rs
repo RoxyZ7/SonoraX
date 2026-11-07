@@ -51,8 +51,6 @@ const AHEAD: f32 = 0.6;
 const REVEAL: f32 = 0.6;
 const ACTIVE_VERSE_GROWTH: Pixels = px(2.);
 const FULLSCREEN_VERSE_GROWTH: Pixels = px(3.);
-/// How much larger than the lane text unsynced lyrics are set, while staying below a synced verse.
-const PLAIN_LYRICS_GROWTH: f32 = 1.15;
 /// The sheet's and a verse's padding on both sides, plus the extra trailing padding a wrapped
 /// verse takes, so no row runs into it.
 const LYRICS_HORIZONTAL_INSET_REM: f32 = 2.;
@@ -969,6 +967,7 @@ impl Aside {
     fn verses(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         let playback = self.playback.read(cx);
+        let duration = playback.shown_time(cx).1;
         let (position, singing) = match playback.steered(cx) {
             Some(remote) => (remote.state.live_position(), remote.state.playing),
             None => (
@@ -978,6 +977,7 @@ impl Aside {
         };
         let lyrics = self.lyrics.read(cx);
         let state = lyrics.state().clone();
+        let generating = lyrics.generating();
         let shown = lyrics.current().is_some();
         let mirrored = lyrics
             .current()
@@ -1121,12 +1121,29 @@ impl Aside {
         let mut body: Vec<gpui::AnyElement> = match (&lines, &state) {
             (Some(lines), _) => {
                 let active_line = sung_line(lines, position);
+                let line_sweep = active_line.and_then(|index| {
+                    let line = &lines[index];
+                    if self.titled || !animations || !karaoke_effects || line.worded() {
+                        return None;
+                    }
+                    let end = line
+                        .end
+                        .or_else(|| lines.get(index + 1).map(|next| next.start))
+                        .or(Some(duration))
+                        .filter(|end| *end > line.start)?;
+                    Some(progress_between(line.start, end, position))
+                });
                 if singing
                     && karaoke_effects
-                    && lines.iter().enumerate().any(|(index, line)| {
-                        line.worded()
-                            && primary_karaoke_visible(line, Some(index) == active_line, position)
-                    })
+                    && (line_sweep.is_some_and(|progress| progress < 1.)
+                        || lines.iter().enumerate().any(|(index, line)| {
+                            line.worded()
+                                && primary_karaoke_visible(
+                                    line,
+                                    Some(index) == active_line,
+                                    position,
+                                )
+                        }))
                 {
                     self.sweep_karaoke(window, cx);
                 }
@@ -1291,11 +1308,13 @@ impl Aside {
                         continue;
                     }
                     let wrapped = self.lyrics_wraps.get(&index);
+                    let row_sweep = line_sweep
+                        .filter(|_| active && wrapped.is_some_and(|plan| !plan.rows.is_empty()));
                     let line_has_ended = active_line.is_some_and(|active| index < active)
                         || line_has_passed(line, position);
                     let worded = karaoke_effects && line.worded() && line.words.is_some();
                     let shade = |singing: bool| match (singing, line_has_ended) {
-                        (true, _) if worded => quiet(&theme),
+                        (true, _) if worded || row_sweep.is_some() => quiet(&theme),
                         (true, _) => theme.foreground,
                         (false, true) => quiet(&theme).opacity(PAST),
                         (false, false) => quiet(&theme).opacity(AHEAD),
@@ -1334,12 +1353,16 @@ impl Aside {
                         ..sung
                     };
 
-                    let primary = match (primary_karaoke, line.words.as_ref(), wrapped) {
-                        (true, Some(words), Some(plan)) => {
+                    let primary = match (primary_karaoke, line.words.as_ref(), wrapped, row_sweep) {
+                        (true, Some(words), Some(plan), _) => {
                             karaoke_lane(plan, line.start, words, position, verse, line.voice, sung)
                                 .into_any_element()
                         }
-                        (_, _, Some(plan)) => {
+                        (_, _, Some(plan), Some(progress)) => {
+                            line_sweep_lane(plan, progress, verse, line.voice, sung)
+                                .into_any_element()
+                        }
+                        (_, _, Some(plan), _) => {
                             fixed_lyrics_lane(&plan.text, line.voice, sung).into_any_element()
                         }
                         _ => div()
@@ -1533,7 +1556,7 @@ impl Aside {
                         let romanized_lines = romanized
                             .as_deref()
                             .map_or_else(Vec::new, |text| text.lines().collect::<Vec<_>>());
-                        let plain_size = (lane_size * PLAIN_LYRICS_GROWTH).round();
+                        let plain_size = lane_size.round();
                         // gpui wraps text by assuming each glyph sits right of the one before it,
                         // which right-to-left text breaks, so such lyrics are wrapped here
                         let rows = has_right_to_left(text).then(|| {
@@ -1554,6 +1577,21 @@ impl Aside {
                                 .collect::<Vec<_>>()
                         });
                         vec![
+                            ui::spoken(
+                                "lyrics-untimed",
+                                if generating {
+                                    t!("lyrics-auto-working")
+                                } else {
+                                    t!("lyrics-untimed")
+                                },
+                            )
+                            .w_full()
+                            .max_w(reach)
+                            .px_2()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .when(sung.mirrored, |this| this.text_right())
+                            .into_any_element(),
                             div()
                                 .id("plain-lyrics")
                                 .role(Role::Paragraph)
@@ -1565,7 +1603,8 @@ impl Aside {
                                 .flex_col()
                                 .gap_1()
                                 .text_size(plain_size)
-                                .font_weight(FontWeight::SEMIBOLD)
+                                .line_height(plain_size * ui::LEADING)
+                                .font_weight(FontWeight::NORMAL)
                                 .text_color(theme.foreground)
                                 .when(sung.mirrored, |this| this.text_right())
                                 .map(|this| match (&rows, romanized.is_some()) {
@@ -2286,48 +2325,8 @@ fn karaoke_lane(
         (Some(&(start, end, tail)), _) => swept(start, end, position, tail),
         (None, _) => 0.,
     };
-    // a right-to-left line is read from its right edge, so its fill grows from there, and the
-    // text inside it hangs from that edge to line up with the text beneath
     let rtl = plan.rtl;
-    let overlay = |text: SharedString, reveal: Reveal, tint: gpui::Hsla| {
-        div()
-            .absolute()
-            .map(|this| match rtl {
-                true => this.right_0(),
-                false => this.left_0(),
-            })
-            .top_0()
-            .bottom_0()
-            .map(|this| match reveal.width {
-                Some(width) => this.w(width),
-                None => this.w(relative(reveal.share)),
-            })
-            .overflow_hidden()
-            .text_color(tint)
-            .when(reveal.landing > 0., |this| {
-                let fade = edge_fade * reveal.landing;
-                match rtl {
-                    true => this.fade_sides(fade, px(0.)),
-                    false => this.fade_sides(px(0.), fade),
-                }
-            })
-            .child(
-                div()
-                    .whitespace_nowrap()
-                    .when(rtl, |this| this.absolute().top_0().right_0())
-                    .child(text),
-            )
-    };
-    let lit = |text: SharedString, reveal: Reveal| {
-        div()
-            .relative()
-            .flex_none()
-            .whitespace_nowrap()
-            .child(text.clone())
-            .when(reveal.shown, |this| {
-                this.child(overlay(text, reveal, sung.karaoke_tint))
-            })
-    };
+    let lit = |text, reveal| karaoke_piece(text, reveal, rtl, edge_fade, sung.karaoke_tint);
 
     match plan.rows.is_empty() {
         false => div()
@@ -2368,6 +2367,94 @@ fn karaoke_lane(
                 lit(fragments[index].clone(), reveal)
             })),
     }
+}
+
+/// Fills line-timed lyrics at an even pace through the known line interval.
+fn line_sweep_lane(plan: &Wrapped, progress: f32, verse: Pixels, voice: Voice, sung: Sung) -> Div {
+    let widths = || {
+        plan.rows.iter().map(|row| {
+            plan.widths[row.clone()]
+                .iter()
+                .copied()
+                .fold(px(0.), |sum, width| sum + width)
+        })
+    };
+    let total = widths().fold(px(0.), |sum, width| sum + width);
+    let mut remaining = total * progress;
+    let fade = verse * REVEAL;
+    div()
+        .flex()
+        .flex_col()
+        .text_left()
+        .children(plan.text.iter().zip(widths()).map(|(text, width)| {
+            let front = remaining.clamp(px(0.), width);
+            remaining -= front;
+            let reveal = Reveal {
+                shown: front > px(0.),
+                width: Some(front),
+                share: 1.,
+                landing: ((width - front) / fade).min(1.),
+            };
+            lifted(
+                div()
+                    .flex()
+                    .when(hugs_end(voice, sung.mirrored), |this| this.justify_end())
+                    .child(karaoke_piece(
+                        text.clone(),
+                        reveal,
+                        plan.rtl,
+                        fade,
+                        sung.karaoke_tint,
+                    )),
+                sung,
+            )
+        }))
+}
+
+/// Clips the bright copy at the sweep front without changing the shaped text beneath it.
+fn karaoke_piece(
+    text: SharedString,
+    reveal: Reveal,
+    rtl: bool,
+    edge: Pixels,
+    tint: gpui::Hsla,
+) -> Div {
+    div()
+        .relative()
+        .flex_none()
+        .whitespace_nowrap()
+        .child(text.clone())
+        .when(reveal.shown, |this| {
+            this.child(
+                div()
+                    .absolute()
+                    .map(|this| match rtl {
+                        true => this.right_0(),
+                        false => this.left_0(),
+                    })
+                    .top_0()
+                    .bottom_0()
+                    .map(|this| match reveal.width {
+                        Some(width) => this.w(width),
+                        None => this.w(relative(reveal.share)),
+                    })
+                    .overflow_hidden()
+                    .text_color(tint)
+                    .when(reveal.landing > 0., |this| {
+                        let fade = edge * reveal.landing;
+                        match rtl {
+                            true => this.fade_sides(fade, px(0.)),
+                            false => this.fade_sides(px(0.), fade),
+                        }
+                    })
+                    .child(
+                        div()
+                            .whitespace_nowrap()
+                            .when(rtl, |this| this.absolute().top_0().right_0())
+                            .child(text),
+                    ),
+            )
+        })
 }
 
 #[derive(Clone, Copy)]
@@ -2531,9 +2618,10 @@ fn selected_romanization(
 
 /// Which source a sheet came from and, when it names them, who wrote the song.
 fn credit_lines(source: &str, writers: &[String]) -> (SharedString, Option<SharedString>) {
-    let from = match source == music::lyrics::LOCAL {
-        true => t!("lyrics-source-local"),
-        false => t!("lyrics-source", source = source),
+    let from = match source {
+        music::lyrics::LOCAL => t!("lyrics-source-local"),
+        state::AUTO_LYRICS_SOURCE => t!("lyrics-auto-credit"),
+        _ => t!("lyrics-source", source = source),
     };
     let by = (!writers.is_empty()).then(|| {
         let writers = writers.join(", ");

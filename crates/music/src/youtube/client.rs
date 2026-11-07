@@ -26,6 +26,14 @@ const COVER_LIMITS: CoverLimits = CoverLimits {
 };
 const EPISODES: &str = "SE";
 
+/// Identifies YouTube's generated mixes, which can use the original video IDs for playback.
+fn is_generated_mix(playlist_id: &str) -> bool {
+    playlist_id
+        .strip_prefix("VL")
+        .unwrap_or(playlist_id)
+        .starts_with("RDTMAK")
+}
+
 pub struct YouTubeClient {
     api: Arc<YtMusic>,
     account: String,
@@ -66,6 +74,17 @@ impl YouTubeClient {
 
 #[async_trait]
 impl MusicApi for YouTubeClient {
+    async fn lyrics_audio(
+        &self,
+        id: &str,
+        quality: crate::Quality,
+        vault: &Arc<crate::vault::Vault>,
+    ) -> Result<Option<Vec<i16>>> {
+        super::playback::lyrics_audio(self.api.clone(), id, quality, vault)
+            .await
+            .map(Some)
+    }
+
     fn share_url(&self, kind: MediaKind, id: &str) -> Option<String> {
         let id = escape::component(id);
         let url = match kind {
@@ -389,7 +408,10 @@ impl MusicApi for YouTubeClient {
 
     async fn playlist(&self, playlist_id: &str) -> Result<PlaylistDetail> {
         let mut detail = self.api.playlist_page(playlist_id).await?;
-        detail.tracks = self.api.swap_playable(detail.tracks).await;
+        // Opening a mix should not wait for a separate search for every music video.
+        if !is_generated_mix(playlist_id) {
+            detail.tracks = self.api.swap_playable(detail.tracks).await;
+        }
         Ok(wire::playlist_detail(detail))
     }
 
@@ -404,13 +426,17 @@ impl MusicApi for YouTubeClient {
 
     async fn playlist_tracks(&self, playlist_id: &str) -> Result<Vec<Track>> {
         let mut detail = self.api.playlist(playlist_id).await?;
-        detail.tracks = self.api.swap_playable(detail.tracks).await;
+        if !is_generated_mix(playlist_id) {
+            detail.tracks = self.api.swap_playable(detail.tracks).await;
+        }
         Ok(wire::playlist_detail(detail).tracks)
     }
 
     async fn playlist_covers(&self, playlist_id: &str, wanted: usize) -> Result<Vec<String>> {
         let mut tracks = self.api.playlist_page(playlist_id).await?.tracks;
-        tracks = self.api.swap_playable(tracks).await;
+        if !is_generated_mix(playlist_id) {
+            tracks = self.api.swap_playable(tracks).await;
+        }
         let tracks: Vec<Track> = tracks
             .into_iter()
             .enumerate()

@@ -846,7 +846,7 @@ impl FullscreenView {
     /// The pill, the seek bar and the transport row. Below `Room::Roomy` the row spans the
     /// whole window, so the volume button steps one control in from the right edge to leave the
     /// corner to the leave button.
-    fn controls(&self, room: Room, cx: &mut Context<Self>) -> impl IntoElement {
+    fn controls(&self, room: Room, panel_hide: f32, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         let inline = self.panel.is_none();
         let clear = match room.fits(Room::Roomy) {
@@ -864,7 +864,14 @@ impl FullscreenView {
             .max_w(px(SEEK_MAX))
             .flex_none()
             .on_click(|_, _, cx| cx.stop_propagation())
-            .when(inline, |this| this.child(self.pill(cx)))
+            .when(inline, |this| {
+                this.child(
+                    div()
+                        .opacity(1. - panel_hide)
+                        .when(panel_hide >= 1., |this| this.invisible())
+                        .child(self.pill(cx)),
+                )
+            })
             .child(self.seek(cx))
             .child(
                 div()
@@ -898,6 +905,7 @@ impl FullscreenView {
         &self,
         cap: Pixels,
         hide: f32,
+        panel_hide: f32,
         collapses: bool,
         room: Room,
         cx: &mut Context<Self>,
@@ -946,7 +954,7 @@ impl FullscreenView {
                             .absolute()
                             .size_full(),
                         )
-                        .child(self.controls(room, cx)),
+                        .child(self.controls(room, panel_hide, cx)),
                 )
             })
     }
@@ -1285,11 +1293,19 @@ impl Render for FullscreenView {
         self.watch(window, cx);
         let idle = self.hidden(window, cx);
         let switching = self.switching(window, cx);
-        let hide = match self.settings.read(cx).fullscreen_controls_autohide() {
+        let visibility = self.settings.read(cx).fullscreen_controls_autohide();
+        let hide = match visibility {
             FullscreenControlsAutohide::Automatic => idle,
             FullscreenControlsAutohide::AlwaysShown => 0.,
             FullscreenControlsAutohide::AlwaysHidden => 1.,
         };
+        // The panel switcher can rest while the transport stays visible.
+        let inline_panel_hide = if visibility == FullscreenControlsAutohide::AlwaysShown {
+            idle
+        } else {
+            0.
+        };
+        let panel_hide = hide.max(inline_panel_hide);
         let shown = hide < 1.;
         let (tall, wide, ceiling, tall_rest, wide_rest, ceiling_rest) = match room.fits(Room::Wide)
         {
@@ -1505,6 +1521,7 @@ impl Render for FullscreenView {
                                     this.child(self.dock(
                                         theme.metrics.player_bar * DOCK,
                                         hide,
+                                        inline_panel_hide,
                                         false,
                                         room,
                                         cx,
@@ -1528,7 +1545,9 @@ impl Render for FullscreenView {
                                     div().size_full().min_h_0().child(self.aside.clone()),
                                     switching,
                                 ))
-                                .when(shown, |this| this.child(self.floating(hide, cx))),
+                                .when(panel_hide < 1., |this| {
+                                    this.child(self.floating(panel_hide, cx))
+                                }),
                         )
                     }),
             )
@@ -1539,6 +1558,7 @@ impl Render for FullscreenView {
                 this.child(self.dock(
                     theme.metrics.player_bar * DOCK_FULL,
                     hide,
+                    inline_panel_hide,
                     !staged,
                     room,
                     cx,

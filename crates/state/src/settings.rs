@@ -335,6 +335,7 @@ struct Held {
 struct Values {
     normalisation: bool,
     gapless: bool,
+    crossfade: u8,
     /// Whether played tracks are kept, sealed, so playing one again downloads nothing.
     keep_tracks: bool,
     /// How many gigabytes the cache of played tracks may take. Downloads do not count.
@@ -581,6 +582,7 @@ impl Default for Values {
         Self {
             normalisation: false,
             gapless: true,
+            crossfade: 0,
             keep_tracks: true,
             offline_mode: false,
             cache_gb: crate::vault::CACHE_GB,
@@ -957,6 +959,10 @@ impl AppSettings {
 
     pub fn gapless(&self) -> bool {
         self.values.gapless
+    }
+
+    pub fn crossfade(&self) -> u8 {
+        self.values.crossfade.min(8)
     }
 
     pub fn keep_tracks(&self) -> bool {
@@ -1547,6 +1553,11 @@ impl AppSettings {
 
     pub fn set_gapless(&mut self, gapless: bool, cx: &mut Context<Self>) {
         self.values.gapless = gapless;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_crossfade(&mut self, seconds: u8, cx: &mut Context<Self>) {
+        self.values.crossfade = seconds;
         self.schedule_save(cx);
     }
 

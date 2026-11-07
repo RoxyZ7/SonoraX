@@ -30,7 +30,7 @@ const COLORS: usize = 5;
 const SHADE: f32 = 0.55;
 /// Time constant of the exponential ease onto a new palette, in seconds. The
 /// field lands within a few percent of the target after about three of these.
-const WASH: f32 = 0.8;
+const WASH: f32 = 0.65;
 /// How many times a second the drifting field is redrawn. The drift is slow enough that 30 frames
 /// read as smooth, and every frame repaints the whole window through the shader.
 const DRIFT_RATE: f32 = 30.;

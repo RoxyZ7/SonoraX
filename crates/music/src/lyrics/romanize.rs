@@ -44,6 +44,14 @@ fn detect<'a>(texts: impl Iterator<Item = &'a str>) -> Option<WritingSystem> {
 }
 
 fn convert(text: &str, system: WritingSystem) -> Option<RomanizedText> {
+    // Thai needs word segmentation and pronunciation rules. The character-wise fallback
+    // can join whole lines together and leave combining marks on Latin letters.
+    if text
+        .chars()
+        .any(|letter| matches!(letter, '\u{0e01}'..='\u{0e4e}') && letter.is_alphabetic())
+    {
+        return None;
+    }
     let romanized = match system {
         WritingSystem::Japanese => super::japanese::romanize(text),
         _ => universal(text),

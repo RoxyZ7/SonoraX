@@ -94,6 +94,7 @@ enum Slot {
     LyricsForLocal,
     Normalisation,
     Gapless,
+    Crossfade,
     KeepTracks,
     CacheSize,
     CacheUsage,
@@ -806,6 +807,7 @@ impl SettingsView {
                 t!("settings-normalisation-detail"),
             ),
             Slot::Gapless => (t!("settings-gapless"), t!("settings-gapless-detail")),
+            Slot::Crossfade => (t!("settings-crossfade"), t!("settings-crossfade-detail")),
             Slot::KeepTracks => (
                 t!("settings-keep-tracks"),
                 t!("settings-keep-tracks-detail"),
@@ -987,6 +989,7 @@ impl SettingsView {
             Slot::AdaptiveMenu => self.adaptive_menu_row(cx),
             Slot::Normalisation => self.playback_row(cx),
             Slot::Gapless => self.gapless_row(cx),
+            Slot::Crossfade => self.crossfade_row(cx),
             Slot::KeepTracks => self.keep_tracks_row(cx),
             Slot::CacheSize => self.cache_size_row(cx),
             Slot::CacheUsage => self.cache_usage_row(cx),

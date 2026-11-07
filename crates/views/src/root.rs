@@ -958,7 +958,7 @@ impl Root {
 
 const UI_FONT: &str = "Inter";
 
-const SCRIPTS: [&str; 18] = [
+const SCRIPTS: [&str; 20] = [
     "Source Han Sans",
     "Noto Sans CJK JP",
     "Noto Sans CJK SC",
@@ -967,6 +967,8 @@ const SCRIPTS: [&str; 18] = [
     "Noto Sans Arabic",
     "Noto Sans Hebrew",
     "Noto Sans Thai",
+    "Leelawadee UI",
+    "Thonburi",
     "Noto Sans Devanagari",
     "Hiragino Sans",
     "PingFang SC",

@@ -9,6 +9,7 @@ use gpui::{
 
 use crate::glass::{blurring, frost};
 use crate::metrics::{Text, text_width};
+use crate::motion::{self, HoverFade, Motion};
 use crate::theme::ActiveTheme as _;
 use crate::tooltip::{Perch, Tipped as _};
 
@@ -28,6 +29,7 @@ const INSET: Pixels = px(12.);
 const GAP: Pixels = px(6.);
 const ICON: Pixels = px(16.);
 const BORDER: Pixels = px(1.);
+const PRESS_DEPTH: f32 = 0.035;
 
 type Click = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -371,7 +373,7 @@ impl RenderOnce for Button {
             on_click,
         } = self;
 
-        let theme = cx.theme();
+        let theme = *cx.theme();
         // A plain ghost floats over flat paint, so it hovers with the themed
         // secondary fill that stays visible on both dark and light surfaces. A
         // frosted ghost floats over real content under blur, so it hovers with
@@ -437,6 +439,18 @@ impl RenderOnce for Button {
         let selected_background = theme.secondary_active;
         let radius = theme.radius;
         let interactive = !disabled;
+        let feedback = if interactive && on_click.is_some() && motion::animates(cx) {
+            base.interactivity().element_id.clone().map(|id| {
+                window.use_keyed_state((id, "button-press"), cx, |_, _| {
+                    HoverFade::new(Motion::Control.span())
+                })
+            })
+        } else {
+            None
+        };
+        let press = feedback.as_ref().map_or(0., |fade| {
+            fade.update(cx, |fade, cx| fade.level(window, cx))
+        });
         // The white hover tint follows `frosted` whatever the setting says, since it is
         // there for a button floating over artwork; only the blur itself is optional.
         let frosting = frosted && interactive && blurring(cx);
@@ -514,6 +528,9 @@ impl RenderOnce for Button {
             .h(height)
             .px(padding)
             .rounded(radius)
+            .when(press > 0., |this| {
+                this.layer_scale(1. - PRESS_DEPTH * press)
+            })
             .text_color(foreground)
             .when(small, |this| this.text_size(theme.text(Text::Label)))
             .when_some(palette.background, |this, background| this.bg(background))
@@ -599,8 +616,31 @@ impl RenderOnce for Button {
             })
             .when(interactive, |this| {
                 this.when_some(on_click, |this, handler| {
-                    this.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(move |event, window, cx| handler(event, window, cx))
+                    this.when_some(feedback, |this, pressed| {
+                        let released = pressed.clone();
+                        let released_outside = pressed.clone();
+                        this.on_mouse_up(MouseButton::Left, move |_, window, cx| {
+                            if released.read(cx).is_set() {
+                                released.update(cx, |fade, _| fade.set(false));
+                                window.refresh();
+                            }
+                        })
+                        .on_mouse_up_out(MouseButton::Left, move |_, window, cx| {
+                            if released_outside.read(cx).is_set() {
+                                released_outside.update(cx, |fade, _| fade.set(false));
+                                window.refresh();
+                            }
+                        })
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            move |_, window, cx| {
+                                pressed.update(cx, |fade, _| fade.set(true));
+                                window.refresh();
+                            },
+                        )
+                    })
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(move |event, window, cx| handler(event, window, cx))
                 })
             });
 

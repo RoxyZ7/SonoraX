@@ -350,6 +350,19 @@ impl RenderOnce for Card {
             (None, false) => None,
         };
         let overrides = std::mem::take(base.style());
+        let cover_motion =
+            if tile.is_some() && press.is_some() && !loading && crate::motion::animates(cx) {
+                base.interactivity().element_id.clone().map(|id| {
+                    window.use_keyed_state((id, "cover-motion"), cx, |_, _| {
+                        crate::motion::HoverFade::new(crate::Motion::Base.span())
+                    })
+                })
+            } else {
+                None
+            };
+        let lift = cover_motion.as_ref().map_or(0., |fade| {
+            fade.update(cx, |fade, cx| fade.level(window, cx))
+        });
 
         let leading = match loading {
             true => Skeleton::new()
@@ -363,6 +376,24 @@ impl RenderOnce for Card {
                 .when_some(fallback, Artwork::fallback)
                 .when(accent, Artwork::accent)
                 .into_any_element(),
+        };
+        let leading = match cover_motion.is_some() {
+            true => div()
+                .size(art)
+                .overflow_hidden()
+                .rounded(if circle {
+                    art / 2.
+                } else {
+                    art_radius.unwrap_or(theme.radius)
+                })
+                .child(
+                    div()
+                        .size(art)
+                        .layer_scale(1. + 0.025 * lift)
+                        .child(leading),
+                )
+                .into_any_element(),
+            false => leading,
         };
         let leading = match play {
             None => leading,
@@ -466,6 +497,19 @@ impl RenderOnce for Card {
                     .child(control)
                     .into_any_element()
             }
+        };
+        let leading = match cover_motion {
+            Some(fade) => div()
+                .id("cover-motion")
+                .flex_none()
+                .size(art)
+                .on_hover(move |hovered, window, cx| {
+                    fade.update(cx, |fade, _| fade.set(*hovered));
+                    window.refresh();
+                })
+                .child(leading)
+                .into_any_element(),
+            None => leading,
         };
 
         // The meta line is an element no reader can reach, so the description or the eyebrow

@@ -14,6 +14,15 @@ const SCHEMA: &str = "
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS lyrics_overrides (
+        track_key TEXT PRIMARY KEY,
+        lrc TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS lyrics_generated (
+        track_key TEXT PRIMARY KEY,
+        fingerprint TEXT NOT NULL,
+        lrc TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS plays (
         scope TEXT NOT NULL,
         provider TEXT NOT NULL,

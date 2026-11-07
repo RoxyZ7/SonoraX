@@ -112,6 +112,16 @@ pub enum Report {
 
 #[async_trait]
 pub trait MusicApi: Send + Sync {
+    /// A mono 16 kHz sample of the exact recording, for on-device lyrics alignment.
+    async fn lyrics_audio(
+        &self,
+        _id: &str,
+        _quality: Quality,
+        _vault: &Arc<vault::Vault>,
+    ) -> Result<Option<Vec<i16>>> {
+        Ok(None)
+    }
+
     fn alive(&self) -> bool {
         true
     }
@@ -412,6 +422,8 @@ pub trait LyricsProvider: Send + Sync {
 pub struct PlaybackConfig {
     pub normalisation: bool,
     pub gapless: bool,
+    /// Seconds of overlap on an automatic transition, or zero to leave it off.
+    pub crossfade: u8,
     pub position_interval: Duration,
     pub gain: f32,
     pub equalizer: Equalizer,
@@ -686,6 +698,10 @@ pub trait Player: Send + Sync {
     /// Fetches a track ahead of time so a later `load` starts at once. `segue` marks the next
     /// queue item, which a gapless engine may already line up behind the current one.
     fn preload(&self, track_id: &str, segue: bool) -> Result<()>;
+    /// Drops a queued transition after the play order changes.
+    fn clear_segue(&self) {}
+    /// Changes the overlap on future automatic transitions.
+    fn set_crossfade(&self, _seconds: u8) {}
     fn play(&self);
     fn pause(&self);
 

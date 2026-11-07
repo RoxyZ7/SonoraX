@@ -748,6 +748,10 @@ settings-normalisation = Normalize loudness
 settings-normalisation-detail = Keeps tracks at a consistent volume
 settings-gapless = Gapless playback
 settings-gapless-detail = Runs one track into the next without a pause, the way an album was sequenced
+settings-crossfade = Crossfade
+settings-crossfade-detail = Overlaps the end of a track with the start of the next one when the audio is ready. Available for compatible tracks played by Sonora’s own audio engine.
+settings-crossfade-off = Off
+settings-crossfade-seconds = { $seconds } s
 settings-keep-tracks = Keep played tracks
 settings-keep-tracks-detail = Saves what you play, locked to this computer, so playing it again downloads nothing. Turning this off deletes it and leaves your downloads alone. Spotify follows a change the next time Sonora starts
 settings-cache-size = Cache size
@@ -1244,6 +1248,16 @@ toast-unpinned = Unpinned { $name }
 
 # lyrics
 lyrics-title = Lyrics
+lyrics-untimed = Unsynced lyrics
+lyrics-auto-working = Syncing lyrics…
+lyrics-auto-credit = Lyrics synced on this device
+lyrics-file-add = Add .lrc
+lyrics-file-replace = Change .lrc
+lyrics-file-reset = Use default lyrics
+lyrics-file-saved = Lyrics file saved for this song
+lyrics-file-removed = Restored default lyrics
+lyrics-file-import-failed = Could not save lyrics. Choose a UTF-8 .lrc file with timestamps, up to 1 MB.
+lyrics-file-remove-failed = Could not remove the lyrics file
 lyrics-idle = Play something to see its lyrics
 lyrics-loading = Looking for lyrics…
 lyrics-missing = No lyrics found, sorry!

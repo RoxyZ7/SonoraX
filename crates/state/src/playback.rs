@@ -423,6 +423,7 @@ pub struct Playback {
     sliding: Option<f32>,
     normalisation: bool,
     gapless: bool,
+    crossfade: u8,
     transcode: Transcode,
     quality: Quality,
     /// Whether tracks that played are cached in `vault`, so playing one again downloads nothing.
@@ -578,6 +579,7 @@ impl Playback {
         })
         .detach();
         cx.observe(&queue, |this, _, cx| {
+            this.check_segue(cx);
             this.continue_station(cx);
             this.suggest_similar(false, cx);
         })
@@ -586,6 +588,7 @@ impl Playback {
         let level = settings.read(cx).volume();
         let normalisation = settings.read(cx).normalisation();
         let gapless = settings.read(cx).gapless();
+        let crossfade = settings.read(cx).crossfade();
         let transcode = settings.read(cx).transcode();
         let quality = settings.read(cx).quality();
         let keep_tracks = settings.read(cx).keep_tracks();
@@ -611,6 +614,7 @@ impl Playback {
             sliding: None,
             normalisation,
             gapless,
+            crossfade,
             transcode,
             quality,
             keep_tracks,
@@ -878,11 +882,10 @@ impl Playback {
         {
             return;
         }
-        if self
-            .preloaded
-            .as_ref()
-            .is_some_and(|held| held.id == id && (held.segue || !segue))
-        {
+        if self.preloaded.as_ref().is_some_and(|held| {
+            (held.id == id && (held.segue || !segue))
+                || (self.crossfade != 0 && held.segue && !segue)
+        }) {
             return;
         }
         self.preloaded = Some(Preloaded {
@@ -1504,7 +1507,8 @@ impl Playback {
         };
         if duration.is_zero()
             || self.state != PlaybackState::Playing
-            || duration.saturating_sub(position) > PRELOAD_BEFORE_END
+            || duration.saturating_sub(position)
+                > PRELOAD_BEFORE_END + Duration::from_secs(u64::from(self.crossfade))
         {
             return;
         }
@@ -1514,6 +1518,12 @@ impl Playback {
     /// Asks the engine to fetch the track that plays after this one. With `segue` it is also
     /// lined up to follow gaplessly, which waits for the end because the queue can still change.
     fn preload_upcoming(&mut self, segue: bool, cx: &Context<Self>) {
+        if self.crossfade != 0 && segue {
+            if let Some(track) = self.segue_target(cx).cloned() {
+                self.preload_internal(&track, true);
+            }
+            return;
+        }
         let next = match self.repeat != Repeat::One {
             true => self.queue.read(cx).upcoming().next().cloned(),
             false => None,
@@ -1524,6 +1534,41 @@ impl Playback {
         };
 
         self.preload_internal(&next, segue);
+    }
+
+    /// A crossfade needs both tracks in the same engine and must respect end-of-track sleep.
+    fn segue_target<'a>(&self, cx: &'a App) -> Option<&'a Track> {
+        if self.repeat == Repeat::One || self.sleep == Some(Sleep::EndOfTrack) {
+            return None;
+        }
+        self.queue
+            .read(cx)
+            .upcoming()
+            .find(|track| track.playable)
+            .filter(|track| {
+                track
+                    .id
+                    .as_deref()
+                    .is_some_and(|id| music::is_local_id(id) == self.local_active())
+            })
+    }
+
+    /// Drops a prepared overlap if an edit to the queue or playback mode changes the next track.
+    fn check_segue(&mut self, cx: &Context<Self>) {
+        if self.crossfade == 0 {
+            return;
+        }
+        let target = self.segue_target(cx).and_then(|track| track.id.as_deref());
+        if self
+            .preloaded
+            .as_ref()
+            .is_some_and(|held| held.segue && Some(held.id.as_str()) != target)
+        {
+            if let Some(engine) = self.active_engine() {
+                engine.clear_segue();
+            }
+            self.preloaded = None;
+        }
     }
 
     pub fn radio(&self) -> bool {
@@ -1702,6 +1747,7 @@ impl Playback {
             return;
         }
         self.repeat = repeat;
+        self.check_segue(cx);
         self.settings
             .update(cx, |settings, cx| settings.set_repeat(repeat, cx));
         cx.notify();
@@ -2052,6 +2098,7 @@ impl Playback {
     /// A timer that runs out while music plays pauses it and says so on a toast.
     pub fn set_sleep(&mut self, sleep: Option<Sleep>, cx: &mut Context<Self>) {
         self.sleep = sleep;
+        self.check_segue(cx);
         self.sleep_task = match sleep {
             Some(Sleep::After(after)) => Some(cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(after).await;
@@ -2354,6 +2401,10 @@ impl Playback {
         self.gapless
     }
 
+    pub fn crossfade(&self) -> u8 {
+        self.crossfade
+    }
+
     pub fn transcode(&self) -> Transcode {
         self.transcode
     }
@@ -2499,6 +2550,24 @@ impl Playback {
         self.settings
             .update(cx, |settings, cx| settings.set_gapless(on, cx));
         self.restart_engine(cx);
+    }
+
+    pub fn set_crossfade(&mut self, seconds: u8, cx: &mut Context<Self>) {
+        let seconds = seconds.min(8);
+        if self.crossfade == seconds {
+            return;
+        }
+        self.crossfade = seconds;
+        self.check_segue(cx);
+        self.settings
+            .update(cx, |settings, cx| settings.set_crossfade(seconds, cx));
+        for engine in [self.engine.as_deref(), self.local_engine.as_deref()]
+            .into_iter()
+            .flatten()
+        {
+            engine.set_crossfade(seconds);
+        }
+        cx.notify();
     }
 
     /// Changes how a converting server is asked to send tracks. The streaming engine restarts,
@@ -2675,6 +2744,7 @@ impl Playback {
         let config = PlaybackConfig {
             normalisation: self.normalisation,
             gapless: self.gapless,
+            crossfade: self.crossfade,
             position_interval: POSITION_INTERVAL,
             gain: gain(self.level),
             transcode: self.transcode,
@@ -2702,6 +2772,7 @@ impl Playback {
         let config = PlaybackConfig {
             normalisation: self.normalisation,
             gapless: self.gapless,
+            crossfade: self.crossfade,
             position_interval: POSITION_INTERVAL,
             gain: gain(self.level),
             transcode: self.transcode,

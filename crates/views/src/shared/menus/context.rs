@@ -101,14 +101,87 @@ impl ItemMenu {
     }
 
     pub fn for_track(&self, track: &Track, cx: &App) -> Menu {
-        self.build(
+        let menu = self.build(
             std::slice::from_ref(track),
             None,
             None,
             None,
             TrackColumns::default(),
             cx,
-        )
+        );
+        let lyrics = &Sonora::global(cx).lyrics;
+        let state = lyrics.read(cx);
+        let Some(id) = track
+            .id
+            .as_ref()
+            .filter(|id| state.following() == Some(id.as_str()))
+        else {
+            return menu;
+        };
+        let editing = state.editing_attachment();
+        let attached = state.has_attachment();
+        let auto_choice = state
+            .hits()
+            .iter()
+            .position(|hit| hit.source == state::AUTO_LYRICS_SOURCE)
+            .and_then(|auto| {
+                let showing_auto = state.current()?.source == state::AUTO_LYRICS_SOURCE;
+                let index = match showing_auto {
+                    true => state.hits().iter().position(|hit| !hit.lyrics.synced())?,
+                    false => auto,
+                };
+                Some((index, showing_auto))
+            });
+        let action = |key, label, remove| {
+            let lyrics = lyrics.clone();
+            let id = id.clone();
+            MenuItem::new(key, label)
+                .when(editing, MenuItem::disabled)
+                .on_click(move |_, _, cx| {
+                    lyrics.update(cx, |lyrics, cx| {
+                        if lyrics.following() == Some(id.as_str()) {
+                            lyrics.edit_attachment(remove, cx);
+                        }
+                    });
+                })
+        };
+        menu.item(MenuItem::separator("lyrics-file-section"))
+            .item(action(
+                "lyrics-file-choose",
+                if attached {
+                    t!("lyrics-file-replace")
+                } else {
+                    t!("lyrics-file-add")
+                },
+                false,
+            ))
+            .when(attached, |menu| {
+                menu.item(action("lyrics-file-remove", t!("lyrics-file-reset"), true))
+            })
+            .when_some(auto_choice, |menu, (index, showing_auto)| {
+                let lyrics = lyrics.clone();
+                let id = id.clone();
+                let revision = state.revision();
+                menu.item(
+                    MenuItem::new(
+                        "lyrics-auto-choice",
+                        if showing_auto {
+                            t!("lyrics-file-reset")
+                        } else {
+                            t!("lyrics-auto-credit")
+                        },
+                    )
+                    .on_click(move |_, _, cx| {
+                        lyrics.update(cx, |lyrics, cx| {
+                            if lyrics.following() == Some(id.as_str())
+                                && lyrics.revision() == revision
+                            {
+                                lyrics.choose(index, cx);
+                            }
+                        });
+                    }),
+                )
+            })
     }
 
     pub fn for_table_tracks(&self, tracks: &[Track], columns: TrackColumns, cx: &App) -> Menu {

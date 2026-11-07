@@ -6,6 +6,7 @@
 //! the `sidx` names, the way Apple Music's does. The threads, the queue, the preload, the gapless
 //! join and the loudness gain are the engine's.
 
+use std::num::NonZero;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -32,6 +33,8 @@ const PATIENCE: Duration = Duration::from_secs(15);
 const ATTEMPTS: u32 = 2;
 /// The level the stream host measures `loudnessDb` against, in LUFS.
 const REFERENCE_LUFS: f32 = -14.0;
+const LYRICS_RATE: u32 = 16_000;
+const LYRICS_LIMIT: Duration = Duration::from_secs(8 * 60);
 /// The levels YouTube Music serves, best first. High is the best AAC stream there is, 256 kbps
 /// for a Premium account and 128 kbps otherwise, normal is the 128 kbps one and low the 48 kbps
 /// HE-AAC one.
@@ -98,6 +101,68 @@ struct YouTube {
     ceiling: Option<u32>,
     /// Where played tracks are kept, so playing one again asks YouTube for nothing.
     shelf: Option<Shelf>,
+}
+
+/// Decodes a second reader without taking control of the player or touching its output.
+pub(super) async fn lyrics_audio(
+    api: Arc<YtMusic>,
+    id: &str,
+    quality: Quality,
+    vault: &Arc<crate::vault::Vault>,
+) -> Result<Vec<i16>> {
+    let reader = YouTube {
+        api,
+        ceiling: ceiling(quality),
+        shelf: Some(vault.shelf("youtube")),
+    };
+    // Give the normal playback download a chance to populate the vault first.
+    let mut loaded = None;
+    for _ in 0..10 {
+        loaded = reader.recall(id).await;
+        if loaded.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    let loaded = match loaded {
+        Some(loaded) => loaded,
+        None => attempt_open(&reader.api, id, reader.ceiling, None).await?,
+    };
+    anyhow::ensure!(
+        loaded
+            .duration
+            .is_none_or(|duration| duration <= LYRICS_LIMIT),
+        "recording too long for automatic lyrics"
+    );
+    tokio::time::timeout(Duration::from_secs(60), loaded.stream.finished()).await?;
+    let id = id.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let source = reader
+            .open(&id, &loaded, Duration::ZERO)
+            .context("cannot decode lyrics audio")?;
+        let limit = LYRICS_RATE as usize * LYRICS_LIMIT.as_secs() as usize;
+        let samples: Vec<i16> = rodio::source::UniformSourceIterator::new(
+            source,
+            NonZero::new(1).unwrap(),
+            NonZero::new(LYRICS_RATE).unwrap(),
+        )
+        .take(limit + 1)
+        .map(|sample| (sample.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16)
+        .collect();
+        anyhow::ensure!(
+            !samples.is_empty() && samples.len() <= limit,
+            "invalid lyrics audio length"
+        );
+        if let Some(duration) = loaded.duration {
+            let seconds = samples.len() as f64 / f64::from(LYRICS_RATE);
+            anyhow::ensure!(
+                seconds + 3.0 >= duration.as_secs_f64(),
+                "incomplete lyrics audio"
+            );
+        }
+        Ok(samples)
+    })
+    .await?
 }
 
 /// What the stream host said about a track, kept beside it in the vault so a kept track plays
