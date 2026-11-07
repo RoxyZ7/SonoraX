@@ -8,7 +8,7 @@ on:
       version:
         description: Release version, without the v prefix
         required: true
-        default: 0.48.1
+        default: 0.48.2
 
 permissions:
   contents: write

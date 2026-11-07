@@ -1297,6 +1297,7 @@ requirement-web-engine = Install webkit2gtk-4.1 to sign in to YouTube Music, Dee
 requirement-help = What to install
 settings-check-updates = Automatic updates
 settings-check-updates-detail = SonoraX installs newer versions automatically when it opens. If an update appears while SonoraX is running, it lets you know.
+settings-auto-updates-enabled = On
 settings-update-channel = Release channel
 settings-update-channel-detail = Stable follows releases. Nightly follows the build of main made every night, which gets changes first and has had less testing
 update-channel-stable = Stable

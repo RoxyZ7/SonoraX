@@ -7,7 +7,7 @@ use gpui::{AnyElement, Context, FontWeight, SharedString, div, img};
 use i18n::t;
 use ui::{ActiveTheme as _, Avatar, Text};
 
-use super::rows::outward;
+use super::rows::{Row, outward};
 use super::{Group, SettingsView, Slot, group_heading};
 
 /// How large the app icon stands, in covers.
@@ -78,11 +78,13 @@ impl SettingsView {
     }
 
     pub(super) fn updates_row(&self, _cx: &mut Context<Self>) -> AnyElement {
-        self.row(
+        Row::new(
             t!("settings-check-updates"),
-            ui::spoken("settings-check-updates", t!("settings-check-updates-detail"))
+            ui::spoken("settings-auto-updates-enabled", t!("settings-auto-updates-enabled"))
                 .into_any_element(),
         )
+        .detail(t!("settings-check-updates-detail"))
+        .into_any_element()
     }
 
     /// The row that opens a copy of the current log file in whatever the system reads text
