@@ -4,6 +4,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, without the v prefix
+        required: true
+        default: 0.48.1
 
 permissions:
   contents: write
@@ -18,11 +23,14 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - name: Build SonoraX
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           $env:CARGO_PROFILE_RELEASE_LTO = 'off'
           $env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS = '16'
           $env:CARGO_PROFILE_RELEASE_OPT_LEVEL = '2'
-          $env:SONORA_VERSION = $env:GITHUB_REF_NAME.TrimStart('v')
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { $env:RELEASE_VERSION }
+          $env:SONORA_VERSION = $version
           cargo build --release --locked --package sonora --target x86_64-pc-windows-msvc --config 'profile.release.package.gpui.codegen-units=1'
           New-Item -ItemType Directory -Path dist | Out-Null
           Copy-Item target/x86_64-pc-windows-msvc/release/sonora.exe dist/SonoraX-x86_64-pc-windows-msvc.exe
@@ -39,5 +47,6 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', inputs.version) }}
           generate_release_notes: true
           files: dist/*
