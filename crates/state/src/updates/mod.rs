@@ -12,8 +12,8 @@ use sha2::{Digest as _, Sha256};
 use crate::{AppSettings, Io, join};
 use install::Install;
 
-const RELEASES: &str = "https://api.github.com/repos/SMOKEx2/SonoraX/releases";
-const RELEASES_PAGE: &str = "https://github.com/SMOKEx2/SonoraX/releases";
+const RELEASES: &str = "https://api.github.com/repos/RoxyZ7/SonoraX/releases";
+const RELEASES_PAGE: &str = "https://github.com/RoxyZ7/SonoraX/releases";
 const SUMS: &str = "SHA256SUMS";
 const CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 /// What the nightly workflow puts before the version label in the nightly release's title.
@@ -27,7 +27,7 @@ pub const VERSION: &str = match option_env!("SONORA_VERSION") {
 const AGENT: &str = concat!(
     "SonoraX/",
     env!("CARGO_PKG_VERSION"),
-    " (https://github.com/SMOKEx2/SonoraX)"
+    " (https://github.com/RoxyZ7/SonoraX)"
 );
 
 /// The builds Sonora updates to. Stable follows tagged releases, and Nightly follows the build

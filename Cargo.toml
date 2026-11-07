@@ -7,7 +7,7 @@ exclude = ["vendor"]
 version = "0.48.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/SMOKEx2/SonoraX"
+repository = "https://github.com/RoxyZ7/SonoraX"
 
 [workspace.dependencies]
 embed = { path = "crates/embed" }

@@ -15,7 +15,7 @@ const MARK_TILE: f32 = 0.5;
 /// The app icon as this platform shows it, registered by the binary's asset source.
 const APP_ICON: &str = "brand/sonora.svg";
 const LICENSE_URL: &str = "https://www.gnu.org/licenses/gpl-3.0.html";
-const SOURCE_URL: &str = "https://github.com/SMOKEx2/SonoraX";
+const SOURCE_URL: &str = "https://github.com/RoxyZ7/SonoraX";
 
 #[derive(Clone, Copy)]
 struct Member {

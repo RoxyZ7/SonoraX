@@ -14,8 +14,8 @@
   <a href="https://sonorahq.org/faq">FAQ</a>
 </p>
 
-[![Build](https://img.shields.io/github/actions/workflow/status/SMOKEx2/SonoraX/sonorax-release.yml?style=flat-square&label=build)](https://github.com/SMOKEx2/SonoraX/actions/workflows/sonorax-release.yml)
-[![License](https://img.shields.io/github/license/SMOKEx2/SonoraX?style=flat-square&label=license&cacheSeconds=3600)](./COPYING)
+[![Build](https://img.shields.io/github/actions/workflow/status/RoxyZ7/SonoraX/sonorax-release.yml?style=flat-square&label=build)](https://github.com/RoxyZ7/SonoraX/actions/workflows/sonorax-release.yml)
+[![License](https://img.shields.io/github/license/RoxyZ7/SonoraX?style=flat-square&label=license&cacheSeconds=3600)](./COPYING)
 
 ### A Thai-localized fork of Sonora
 
@@ -63,7 +63,7 @@ SonoraX is based on [Sonora](https://github.com/sonorahq/sonora), an open-source
 
 ### Windows
 
-Download the latest `SonoraX-x86_64-pc-windows-msvc.exe` from [SonoraX Releases](https://github.com/SMOKEx2/SonoraX/releases/latest). SonoraX checks for newer releases at startup and installs them automatically. When an update appears while the app is open, it shows an update notice.
+Download the latest `SonoraX-x86_64-pc-windows-msvc.exe` from [SonoraX Releases](https://github.com/RoxyZ7/SonoraX/releases/latest). SonoraX checks for newer releases at startup and installs them automatically. When an update appears while the app is open, it shows an update notice.
 
 ## Upstream installation
 
