@@ -133,14 +133,9 @@ SonoraX is built on Sonora and uses the help of some incredible open-source proj
 
 ## Code signing policy
 
-Free code signing provided by [SignPath.io](https://signpath.io), certificate by
-[SignPath Foundation](https://signpath.org).
-
-The Windows executable and installer are built by GitHub Actions from this repository and signed
-through SignPath.
-
-- Reviewers: members of sonorahq
-- Approvers: [@nolight132](https://github.com/nolight132)
+GitHub Actions builds the SonoraX Windows executables and installers without Authenticode
+signatures. The macOS app uses an ad hoc signature. Each GitHub release includes
+`SHA256SUMS` so you can verify downloaded files.
 
 ## License
 

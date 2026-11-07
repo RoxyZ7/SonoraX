@@ -686,6 +686,24 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: stage standalone Flatpak bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: flatpak-*
+          path: standalone-flatpak
+          merge-multiple: true
+
+      - name: verify Flatpak bundles
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          for arch in x86_64 aarch64; do
+            bundle="SonoraX-$VERSION-$arch.flatpak"
+            if [ ! -f "dist/$bundle" ]; then cp "standalone-flatpak/$bundle" "dist/$bundle"; fi
+            test -s "dist/$bundle"
+          done
+
       - name: stage the licenses
         env:
           VERSION: ${{ github.ref_name }}
