@@ -209,7 +209,8 @@ fn extract_engine(archive: &[u8], destination: &Path) -> Result<()> {
         if !entry.header().entry_type().is_file() {
             continue;
         }
-        let Some(name) = entry.path()?.file_name().and_then(|name| name.to_str()) else {
+        let entry_path = entry.path()?;
+        let Some(name) = entry_path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
         let destination_name = match name {

@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        A log turns a bug report into a fix. Sonora writes one to
+        A log turns a bug report into a fix. SonoraX writes one to
         `~/.local/state/sonora/sonora.log` on Linux, `~/Library/Caches/sonora/sonora.log` on macOS
         and `%LOCALAPPDATA%\sonora\sonora.log` on Windows. Reproduce the problem first, then attach
         the tail of that file. `SONORA_LOG=debug` on the command line makes it more detailed.
@@ -51,7 +51,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Sonora version
+      label: SonoraX version
       description: The first line of the log file names it.
       placeholder: 0.29.0
     validations:

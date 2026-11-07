@@ -24,8 +24,8 @@ const MAX_START_DRIFT_SECONDS: u64 = 2;
 const MAX_TEXT_UTF16_UNITS: usize = 128;
 /// What the status says when it names the music rather than a service.
 const MUSIC: &str = "Music";
-/// Where the Sonora button sends a friend who presses it.
-const SONORA_URL: &str = "https://sonorahq.org";
+/// Where the SonoraX button sends a friend who presses it.
+const SONORA_URL: &str = "https://github.com/RoxyZ7/SonoraX";
 
 struct Attached {
     _discord: Entity<Discord>,
