@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.48.5] - 2026-11-07
+
+### Fixed
+
+- The Windows executable's file details now identify the product as SonoraX.
+
 ## [0.48.4] - 2026-11-07
 
 ### Added
