@@ -27,7 +27,7 @@ const FORMAT_VERSION: u32 = 1;
 /// The scheme every link meant for Sonora itself uses.
 const SCHEME: &str = "sonora:";
 /// What a theme link starts with. The theme file or family follows as unpadded base64url.
-const THEME_LINK: &str = "sonora://theme/";
+const THEME_LINK: &str = "sonorax://theme/";
 /// The longest theme link read. A full theme file encodes to about 2 KiB.
 const LINK_LIMIT: usize = 16 * 1024;
 /// How many variants a linked family may have.
@@ -327,7 +327,7 @@ pub fn is_own_link(text: &str) -> bool {
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case(SCHEME))
 }
 
-/// Reads the theme a `sonora://theme/` link carries. The link has to be short, its payload pure
+/// Reads the theme a `sonorax://theme/` link carries. The link has to be short, its payload pure
 /// base64url, and the file inside has to pass the same checks as one in the themes folder. A
 /// name or author with control or direction characters is refused, since both are shown as
 /// they are.

@@ -224,7 +224,7 @@ fn private_dir() -> io::Result<std::path::PathBuf> {
         (Some(runtime), None) => return Ok(runtime),
         (None, _) => dirs::cache_dir()
             .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "no runtime or cache folder"))?
-            .join("sonora"),
+            .join("sonorax"),
     };
     std::fs::DirBuilder::new()
         .recursive(true)

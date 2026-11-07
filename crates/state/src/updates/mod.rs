@@ -4,7 +4,7 @@ use std::io::Write as _;
 use std::path::PathBuf;
 
 use anyhow::{Context as _, Result};
-use gpui::{Context, Entity, SharedString, Subscription, Task};
+use gpui::{Context, Entity, SharedString, Task};
 use i18n::t;
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -12,10 +12,11 @@ use sha2::{Digest as _, Sha256};
 use crate::{AppSettings, Io, join};
 use install::Install;
 
-const RELEASES: &str = "https://api.github.com/repos/sonorahq/sonora/releases";
+const RELEASES: &str = "https://api.github.com/repos/SMOKEx2/SonoraX/releases";
+const RELEASES_PAGE: &str = "https://github.com/SMOKEx2/SonoraX/releases";
 const SUMS: &str = "SHA256SUMS";
+const CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 /// What the nightly workflow puts before the version label in the nightly release's title.
-const NIGHTLY_TITLE: &str = "Nightly ";
 /// The version this build shows and reports. The nightly workflow sets `SONORA_VERSION` at
 /// compile time to a label such as `0.44.2-nightly.20261026`, and every other build falls back
 /// to the Cargo version.
@@ -24,9 +25,9 @@ pub const VERSION: &str = match option_env!("SONORA_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 const AGENT: &str = concat!(
-    "sonora/",
+    "SonoraX/",
     env!("CARGO_PKG_VERSION"),
-    " (https://github.com/sonorahq/sonora)"
+    " (https://github.com/SMOKEx2/SonoraX)"
 );
 
 /// The builds Sonora updates to. Stable follows tagged releases, and Nightly follows the build
@@ -72,10 +73,7 @@ impl Channel {
     }
 
     fn url(self) -> String {
-        match self {
-            Self::Stable => format!("{RELEASES}/latest"),
-            Self::Nightly => format!("{RELEASES}/tags/nightly"),
-        }
+        format!("{RELEASES}/latest")
     }
 }
 
@@ -104,39 +102,35 @@ pub enum UpdateState {
 
 pub struct Updates {
     state: UpdateState,
-    settings: Entity<AppSettings>,
     http: reqwest::Client,
     io: Io,
     task: Option<Task<()>>,
-    /// The channel chosen in settings when Sonora last looked, so a different choice looks again.
+    /// SonoraX currently follows stable releases.
     channel: Channel,
-    _settings: Subscription,
+    first_check: bool,
+    _poll: Task<()>,
 }
 
 impl Updates {
-    pub fn new(settings: Entity<AppSettings>, io: Io, cx: &mut Context<Self>) -> Self {
-        let channel = settings.read(cx).update_channel();
-        let watch = cx.observe(&settings, |this: &mut Self, settings, cx| {
-            let channel = settings.read(cx).update_channel();
-            if channel == this.channel {
-                return;
-            }
-            this.channel = channel;
-            this.task = None;
-            this.state = UpdateState::Quiet;
-            cx.notify();
-            this.look(true, cx);
-        });
+    pub fn new(_settings: Entity<AppSettings>, io: Io, cx: &mut Context<Self>) -> Self {
+        let channel = Channel::Stable;
         let mut updates = Self {
             state: UpdateState::Quiet,
-            settings,
             http: reqwest::Client::new(),
             io,
             task: None,
             channel,
-            _settings: watch,
+            first_check: true,
+            _poll: cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor().timer(CHECK_EVERY).await;
+                    if this.update(cx, |this, cx| this.look(cx)).is_err() {
+                        break;
+                    }
+                }
+            }),
         };
-        updates.look(false, cx);
+        updates.look(cx);
         updates
     }
 
@@ -156,6 +150,10 @@ impl Updates {
             && self
                 .offered()
                 .is_some_and(|release| release.package.is_some() && release.sums.is_some())
+    }
+
+    pub fn releases_page(&self) -> &'static str {
+        RELEASES_PAGE
     }
 
     pub fn dismiss(&mut self, cx: &mut Context<Self>) {
@@ -205,18 +203,14 @@ impl Updates {
         }));
     }
 
-    /// Asks GitHub for the newest build on the chosen channel. `asked` marks a look the user
-    /// started by switching channels, which runs even with update checks turned off. A copy a
-    /// package manager installed follows its own build's channel, and a nightly one never looks.
-    fn look(&mut self, asked: bool, cx: &mut Context<Self>) {
+    /// Asks GitHub for the newest stable SonoraX build.
+    fn look(&mut self, cx: &mut Context<Self>) {
         let channel = match updates_itself() {
             true => self.channel,
             false if Channel::running() == Channel::Stable => Channel::Stable,
             false => return,
         };
-        if !asked && !self.settings.read(cx).check_updates() {
-            return;
-        }
+        let startup = std::mem::replace(&mut self.first_check, false);
         let http = self.http.clone();
         let io = self.io.clone();
         self.task = Some(cx.spawn(async move |this, cx| {
@@ -225,8 +219,17 @@ impl Updates {
                 this.task = None;
                 match found {
                     Ok(Some(release)) => {
-                        this.state = UpdateState::Offered(release);
-                        cx.notify();
+                        if startup
+                            && updates_itself()
+                            && release.package.is_some()
+                            && release.sums.is_some()
+                        {
+                            this.state = UpdateState::Offered(release);
+                            this.install(cx);
+                        } else {
+                            this.state = UpdateState::Offered(release);
+                            cx.notify();
+                        }
                     }
                     Ok(None) => {}
                     Err(error) => log::warn!("updates: cannot ask github: {error:#}"),
@@ -240,8 +243,6 @@ impl Updates {
 #[derive(Deserialize)]
 struct Published {
     tag_name: String,
-    #[serde(default)]
-    name: Option<String>,
     html_url: String,
     #[serde(default)]
     assets: Vec<Asset>,
@@ -268,15 +269,7 @@ async fn latest(http: &reqwest::Client, channel: Channel) -> Result<Option<Relea
         .await
         .context("cannot read the github release")?;
 
-    let version = match channel {
-        Channel::Stable => published.tag_name.trim_start_matches('v').to_owned(),
-        Channel::Nightly => published
-            .name
-            .as_deref()
-            .and_then(|name| name.strip_prefix(NIGHTLY_TITLE))
-            .context("the nightly release names no version")?
-            .to_owned(),
-    };
+    let version = published.tag_name.trim_start_matches('v').to_owned();
     if !wanted(channel, &version) {
         return Ok(None);
     }

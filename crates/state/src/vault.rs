@@ -18,7 +18,7 @@ use gpui::{App, AppContext as _, AsyncApp, Task};
 use music::vault::{MASTER, Vault};
 
 /// The keychain entry the master key is stored under.
-const KEYCHAIN_URL: &str = "sonora://kept-tracks";
+const KEYCHAIN_URL: &str = "sonorax://kept-tracks";
 const KEYCHAIN_USER: &str = "sonora";
 /// How many gigabytes the cache of played tracks may take until the listener says otherwise.
 pub(crate) const CACHE_GB: u32 = 2;
