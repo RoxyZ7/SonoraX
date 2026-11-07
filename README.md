@@ -2,7 +2,7 @@
 
 <img src="./.github/readme-icon.svg" alt="" width="60" height="60">
 
-<h1>Sonora</h1>
+<h1>SonoraX</h1>
 
 <p align="center">
   <a href="https://sonorahq.org/changelog">Changelog</a>
@@ -14,16 +14,13 @@
   <a href="https://sonorahq.org/faq">FAQ</a>
 </p>
 
-[![Build](https://img.shields.io/github/actions/workflow/status/sonorahq/sonora/release.yml?style=flat-square&label=build)](https://github.com/sonorahq/sonora/actions/workflows/release.yml)
-[![License](https://img.shields.io/github/license/sonorahq/sonora?style=flat-square&label=license&cacheSeconds=3600)](./COPYING)
-![Installs](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fsonora-stats.nolight.dev%2Fcount&query=%24.count&label=Installs&color=blue&style=flat-square)
-\
-[![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/a8N8Tx23rV)
-[![Matrix](https://img.shields.io/badge/Matrix-000000?style=for-the-badge&logo=matrix&logoColor=white)](https://matrix.to/#/#sonora:nolight.dev)
+[![Build](https://img.shields.io/github/actions/workflow/status/SMOKEx2/SonoraX/sonorax-release.yml?style=flat-square&label=build)](https://github.com/SMOKEx2/SonoraX/actions/workflows/sonorax-release.yml)
+[![License](https://img.shields.io/github/license/SMOKEx2/SonoraX?style=flat-square&label=license&cacheSeconds=3600)](./COPYING)
 
-### A native, familiar music streaming client
+### A Thai-localized fork of Sonora
 
 Stream from your favorite services and play local files — all in one **native** app.
+SonoraX is an unofficial community fork. It keeps its own public source and Windows releases, and checks this repository for updates.
 </div>
 
 <div align="center">
@@ -50,7 +47,7 @@ Stream from your favorite services and play local files — all in one **native*
 </div>
 
 > [!IMPORTANT]
-> **Sonora is not a piracy tool.**
+> **SonoraX is not a piracy tool.**
 >
 > Sonora is not a platform for obtaining or sharing copyrighted material. We will not implement any functions that can be used to export decrypted streams, DRM licenses, content keys, or to convert protected streams into media files.
 >
@@ -59,6 +56,18 @@ Stream from your favorite services and play local files — all in one **native*
 > Features aimed at ripping, downloading, distributing, or gaining access to protected streaming content are out of scope for the project.
 
 ## Installation
+
+SonoraX is based on [Sonora](https://github.com/sonorahq/sonora), an open-source music player. Please see the upstream project for its original contributors and documentation.
+
+## Download
+
+### Windows
+
+Download the latest `SonoraX-x86_64-pc-windows-msvc.exe` from [SonoraX Releases](https://github.com/SMOKEx2/SonoraX/releases/latest). SonoraX checks for newer releases at startup and installs them automatically. When an update appears while the app is open, it shows an update notice.
+
+## Upstream installation
+
+The following installation methods install the original Sonora, not SonoraX.
 
 ### macOS
 

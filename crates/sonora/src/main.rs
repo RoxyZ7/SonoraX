@@ -126,7 +126,7 @@ fn main() -> ExitCode {
             Arc::new(music::local::LocalProvider::new(
                 dirs::cache_dir()
                     .unwrap_or_else(std::env::temp_dir)
-                    .join("sonora"),
+                    .join("SonoraX"),
                 database.clone(),
                 storage::Cache::standard(),
             ));
@@ -361,7 +361,7 @@ fn open_window(cx: &mut App) {
             display_id,
             window_background: background,
             titlebar: Some(TitlebarOptions {
-                title: Some("Sonora".into()),
+                title: Some("SonoraX".into()),
                 appears_transparent: true,
                 traffic_light_position: Some(traffic_lights),
             }),
@@ -369,7 +369,7 @@ fn open_window(cx: &mut App) {
             is_movable: true,
             is_resizable: true,
             app_owns_titlebar_drag: true,
-            app_id: Some("sonora".into()),
+            app_id: Some("sonorax".into()),
             window_min_size: Some(LEAST_SIZE),
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             window_decorations: Some(decorations),

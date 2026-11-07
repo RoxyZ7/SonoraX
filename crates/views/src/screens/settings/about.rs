@@ -5,10 +5,9 @@ use std::path::{Path, PathBuf};
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, FontWeight, SharedString, div, img};
 use i18n::t;
-use state::Channel;
-use ui::{ActiveTheme as _, Avatar, Switch, Text};
+use ui::{ActiveTheme as _, Avatar, Text};
 
-use super::rows::{outward, segmented};
+use super::rows::outward;
 use super::{Group, SettingsView, Slot, group_heading};
 
 /// How large the app icon stands, in covers.
@@ -16,7 +15,7 @@ const MARK_TILE: f32 = 0.5;
 /// The app icon as this platform shows it, registered by the binary's asset source.
 const APP_ICON: &str = "brand/sonora.svg";
 const LICENSE_URL: &str = "https://www.gnu.org/licenses/gpl-3.0.html";
-const SOURCE_URL: &str = "https://github.com/sonorahq/sonora";
+const SOURCE_URL: &str = "https://github.com/SMOKEx2/SonoraX";
 
 #[derive(Clone, Copy)]
 struct Member {
@@ -64,13 +63,9 @@ const MEMBERS: [Member; 5] = [
 
 impl SettingsView {
     pub(super) fn about_groups(&self) -> Vec<Group> {
-        let channel = state::updates_itself().then_some(Slot::Channel);
         vec![
             Group::untitled().rows(
-                [Slot::Version, Slot::Updates]
-                    .into_iter()
-                    .chain(channel)
-                    .chain([Slot::Log, Slot::License, Slot::Source]),
+                [Slot::Version, Slot::Updates, Slot::Log, Slot::License, Slot::Source],
             ),
         ]
     }
@@ -82,39 +77,10 @@ impl SettingsView {
         )
     }
 
-    pub(super) fn updates_row(&self, cx: &mut Context<Self>) -> AnyElement {
-        let on = self.settings.read(cx).check_updates();
-
+    pub(super) fn updates_row(&self, _cx: &mut Context<Self>) -> AnyElement {
         self.row(
             t!("settings-check-updates"),
-            Switch::new("check-updates", on)
-                .name(t!("settings-check-updates"))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.settings
-                        .update(cx, |settings, cx| settings.set_check_updates(!on, cx));
-                }))
-                .into_any_element(),
-        )
-    }
-
-    pub(super) fn channel_row(&self, cx: &mut Context<Self>) -> AnyElement {
-        let current = self.settings.read(cx).update_channel();
-
-        let choices = segmented(
-            "update-channel",
-            Channel::ALL.map(|channel| (channel, channel.label())),
-            current,
-            cx.listener(|this, channel: &Channel, _, cx| {
-                let channel = *channel;
-                this.settings
-                    .update(cx, |settings, cx| settings.set_update_channel(channel, cx));
-            }),
-        );
-
-        self.row(
-            t!("settings-update-channel"),
-            choices
-                .name(t!("settings-update-channel"))
+            ui::spoken("settings-check-updates", t!("settings-check-updates-detail"))
                 .into_any_element(),
         )
     }
@@ -190,7 +156,7 @@ impl SettingsView {
             .child(t!("settings-notice"))
     }
 
-    /// The people behind Sonora, each opening their GitHub profile.
+    /// The people behind the upstream project, each opening their GitHub profile.
     pub(super) fn team(&self, cx: &Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
 

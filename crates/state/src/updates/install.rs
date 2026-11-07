@@ -8,8 +8,13 @@ use anyhow::{Context as _, Result};
 const UNINSTALLER: &str = "unins000.exe";
 #[cfg(target_os = "windows")]
 const INSTALLER: &str = match cfg!(target_arch = "aarch64") {
-    true => "Sonora-Setup-arm64.exe",
-    false => "Sonora-Setup.exe",
+    true => "SonoraX-Setup-arm64.exe",
+    false => "SonoraX-Setup.exe",
+};
+#[cfg(target_os = "windows")]
+const PORTABLE: &str = match cfg!(target_arch = "aarch64") {
+    true => "SonoraX-aarch64-pc-windows-msvc.exe",
+    false => "SonoraX-x86_64-pc-windows-msvc.exe",
 };
 /// Where Homebrew keeps the stable and the nightly cask, on Apple silicon and on Intel. Any of
 /// them existing means Homebrew owns /Applications/Sonora.app, though not a copy installed
@@ -22,12 +27,14 @@ const CASKROOMS: [&str; 4] = [
     "/usr/local/Caskroom/sonora-nightly",
 ];
 
-/// How this copy of Sonora was installed, which decides whether it may replace itself.
+/// How this copy of SonoraX was installed, which decides whether it may replace itself.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Install {
     /// The Windows installer, which upgrades the install in place.
     #[cfg(target_os = "windows")]
     Setup,
+    #[cfg(target_os = "windows")]
+    Portable(std::path::PathBuf),
     /// An app bundle Sonora can write beside, outside Homebrew and the Nix store.
     #[cfg(target_os = "macos")]
     Bundle(std::path::PathBuf),
@@ -54,6 +61,8 @@ impl Install {
         match self {
             #[cfg(target_os = "windows")]
             Self::Setup => asset == INSTALLER,
+            #[cfg(target_os = "windows")]
+            Self::Portable(_) => asset == PORTABLE,
             #[cfg(target_os = "macos")]
             Self::Bundle(_) => asset.ends_with("-macos.dmg"),
             #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -69,6 +78,8 @@ impl Install {
         match self {
             #[cfg(target_os = "windows")]
             Self::Setup => setup(download),
+            #[cfg(target_os = "windows")]
+            Self::Portable(exe) => portable(download, exe),
             #[cfg(target_os = "macos")]
             Self::Bundle(bundle) => swap_bundle(download, bundle),
             #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -84,10 +95,55 @@ fn detect() -> Install {
         .ok()
         .and_then(|exe| Some(exe.parent()?.join(UNINSTALLER)))
         .is_some_and(|uninstaller| uninstaller.exists());
-    match installed {
-        true => Install::Setup,
-        false => Install::Managed,
+    if installed {
+        return Install::Setup;
     }
+    std::env::current_exe()
+        .ok()
+        .filter(|exe| exe.parent().is_some_and(writable))
+        .map_or(Install::Managed, Install::Portable)
+}
+
+#[cfg(target_os = "windows")]
+fn portable(download: &Path, executable: &Path) -> Result<()> {
+    use std::io::Write as _;
+
+    let directory = executable
+        .parent()
+        .context("SonoraX has no install directory")?;
+    let staged = directory.join("SonoraX.update.exe");
+    std::fs::copy(download, &staged).context("cannot stage the SonoraX update")?;
+    let script = std::env::temp_dir().join(format!("sonorax-update-{}.ps1", std::process::id()));
+    let previous = directory.join("SonoraX.previous.exe");
+    let mut file = std::fs::File::create(&script).context("cannot prepare the updater")?;
+    writeln!(file, "$ErrorActionPreference = 'Stop'")?;
+    writeln!(file, "$exe = '{}'", quote_path(executable))?;
+    writeln!(file, "$stage = '{}'", quote_path(&staged))?;
+    writeln!(file, "$old = '{}'", quote_path(&previous))?;
+    writeln!(file, "Start-Sleep -Seconds 2")?;
+    writeln!(
+        file,
+        "try {{ Move-Item -LiteralPath $exe -Destination $old -Force; Move-Item -LiteralPath $stage -Destination $exe -Force; Start-Process -FilePath $exe; Remove-Item -LiteralPath $old -Force }} catch {{ if (Test-Path -LiteralPath $old) {{ Move-Item -LiteralPath $old -Destination $exe -Force }}; exit 1 }}"
+    )?;
+    drop(file);
+    Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(&script)
+        .spawn()
+        .context("cannot start the SonoraX updater")?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn quote_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\'', "''")
 }
 
 /// A bundle counts when Sonora runs from its own `.app` in a folder it can write to. Homebrew's,
@@ -141,6 +197,22 @@ fn writable(folder: &Path) -> bool {
     };
     // SAFETY: `path` is a valid NUL-terminated string that outlives the call.
     unsafe { libc::access(path.as_ptr(), libc::W_OK) == 0 }
+}
+
+#[cfg(target_os = "windows")]
+fn writable(folder: &Path) -> bool {
+    let probe = folder.join(format!(".sonorax-write-test-{}", std::process::id()));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
+        Ok(file) => {
+            drop(file);
+            std::fs::remove_file(probe).is_ok()
+        }
+        Err(_) => false,
+    }
 }
 
 /// Runs the Inno Setup installer silently. It waits for Sonora to quit, upgrades it and starts

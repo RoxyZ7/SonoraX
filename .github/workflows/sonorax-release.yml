@@ -1,0 +1,42 @@
+name: SonoraX release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Build SonoraX
+        shell: pwsh
+        run: |
+          $env:CARGO_PROFILE_RELEASE_LTO = 'off'
+          $env:CARGO_PROFILE_RELEASE_CODEGEN_UNITS = '16'
+          $env:CARGO_PROFILE_RELEASE_OPT_LEVEL = '2'
+          $env:SONORA_VERSION = $env:GITHUB_REF_NAME.TrimStart('v')
+          cargo build --release --locked --package sonora --target x86_64-pc-windows-msvc --config 'profile.release.package.gpui.codegen-units=1'
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/sonora.exe dist/SonoraX-x86_64-pc-windows-msvc.exe
+          choco install innosetup --yes --no-progress
+          $env:SONORA_EXE = (Resolve-Path 'target/x86_64-pc-windows-msvc/release/sonora.exe').Path
+          $env:SONORA_DIST = (Resolve-Path 'dist').Path
+          $env:SONORA_ARCH = 'x64compatible'
+          $env:SONORA_SETUP = 'SonoraX-Setup'
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" 'scripts/windows/sonora.iss'
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
+          Copy-Item THIRD-PARTY.md dist/SonoraX-THIRD-PARTY.md
+          Copy-Item COPYING dist/LICENSE
+          Get-FileHash dist/* -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content dist/SHA256SUMS
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*
