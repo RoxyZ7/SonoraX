@@ -405,6 +405,8 @@ artist-popular-eyebrow = สำรวจศิลปินคนนี้
 artist-popular-empty = ยังไม่มีสิ่งใดให้เล่นจากศิลปินคนนี้
 artist-popular-more = แสดงทั้งหมด
 artist-popular-less = แสดงน้อยลง
+artist-favorite-songs = เพลงโปรดของคุณ
+artist-favorite-songs-count = { $count } เพลงในรายการโปรด
 artist-releases = ข่าวประชาสัมพันธ์
 artist-releases-more = แสดงทั้งหมด
 artist-releases-less = แสดงน้อยลง
@@ -1008,6 +1010,8 @@ equalizer-status-channels =
         [2] สเตอริโอ
        *[other] { $to } ช
     }
+settings-lyrics = แสดงเนื้อเพลง
+settings-lyrics-detail = ปิดเพื่อซ่อนเนื้อเพลงทุกหน้าและหยุดค้นหาเนื้อเพลง
 settings-panel-lyrics-size = ขนาดข้อความในแผง
 settings-panel-lyrics-size-detail = ขนาดของข้อความเนื้อเพลงในแผงด้านข้าง ที่ด้านบนของขนาดตัวอักษรพื้นฐาน
 settings-fullscreen-lyrics-size = ขนาดข้อความในกำลังเล่น
