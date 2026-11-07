@@ -104,6 +104,7 @@ def main():
 
         for destination in (
             ROOT / ".github" / "readme-icon.svg",
+            assets / "icons" / "common" / "sonora.svg",
             assets / "linux" / "sonora.svg",
             assets / "macos" / "sonora.svg",
             assets / "windows" / "sonora.svg",
