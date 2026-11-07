@@ -105,6 +105,8 @@ jobs:
           cargo build --release --locked --package sonora --target "$TARGET"
 
       - name: build the lyrics engine
+        env:
+          TARGET: ${{ matrix.target }}
         shell: bash
         run: |
           set -euo pipefail
