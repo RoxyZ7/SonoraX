@@ -110,16 +110,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake_args=()
-          if [[ "$RUNNER_OS" == Windows && "$TARGET" == aarch64-pc-windows-msvc ]]; then
-            cmake_args=(-T ClangCL)
-          fi
-          cmake -S work/whisper.cpp -B work/whisper.cpp/build "${cmake_args[@]}" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DGGML_NATIVE=OFF \
-            -DWHISPER_BUILD_TESTS=OFF \
-            -DWHISPER_BUILD_EXAMPLES=ON \
+          cmake_args=(
+            -DBUILD_SHARED_LIBS=OFF
+            -DGGML_NATIVE=OFF
+            -DWHISPER_BUILD_TESTS=OFF
+            -DWHISPER_BUILD_EXAMPLES=ON
             -DWHISPER_BUILD_SERVER=OFF
+          )
+          if [[ "$RUNNER_OS" == Windows && "$TARGET" == aarch64-pc-windows-msvc ]]; then
+            cmake_args=(-T ClangCL "${cmake_args[@]}")
+          fi
+          cmake -S work/whisper.cpp -B work/whisper.cpp/build "${cmake_args[@]}"
           cmake --build work/whisper.cpp/build --config Release --target whisper-cli --parallel 2
           mkdir -p dist/lyrics-engine
           if [[ "$RUNNER_OS" == Windows ]]; then
