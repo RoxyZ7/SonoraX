@@ -6,8 +6,8 @@ use std::rc::Rc;
 
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Div, ElementId, Entity, EntityId, FocusHandle, Pixels, ScrollHandle, Window, div,
-    px,
+    App, Context, Div, ElementId, Entity, EntityId, FocusHandle, Focusable as _, Pixels,
+    ScrollHandle, Window, div, px,
 };
 use ui::{Input, Menu, Picker, Scrollbar, SelectNext, SelectPrevious, Submit};
 
@@ -78,16 +78,26 @@ impl SearchPopup {
         if self.open.replace(open) == open {
             return;
         }
-        match open {
-            true => {
-                self.place(selected, cx);
-                self.input.update(cx, |input, cx| input.focus(window, cx));
-            }
-            false => {
-                self.input.update(cx, |input, cx| input.set_text("", cx));
-                window.focus(&self.restore, cx);
-            }
+        if open {
+            self.place(selected, cx);
         }
+        let popup = self.clone();
+        // The accessibility tree records focus as elements are drawn. Changing it here
+        // could make both the old target and the search field claim the same frame.
+        window.on_next_frame(move |window, cx| {
+            if popup.open.get() != open {
+                return;
+            }
+            if open {
+                popup.input.read(cx).focus_handle(cx).focus(window, cx);
+            } else {
+                let input_focus = popup.input.read(cx).focus_handle(cx);
+                popup.input.update(cx, |input, cx| input.set_text("", cx));
+                if input_focus.is_focused(window) || window.focused(cx).is_none() {
+                    window.focus(&popup.restore, cx);
+                }
+            }
+        });
     }
 
     /// Moves the cursor to `selected` and scrolls it into view, for when the

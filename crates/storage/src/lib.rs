@@ -9,6 +9,14 @@ use rusqlite::Connection;
 
 pub use cache::Cache;
 
+/// Gives a preview its own data directory while preserving each stable path.
+pub fn profile_folder(stable: &'static str) -> &'static str {
+    match option_env!("SONORA_VERSION") {
+        Some(version) if version.as_bytes().ends_with(b"-dev") => "SonoraX Dev",
+        _ => stable,
+    }
+}
+
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS app_state (
         key TEXT PRIMARY KEY,
@@ -17,6 +25,10 @@ const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS lyrics_overrides (
         track_key TEXT PRIMARY KEY,
         lrc TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS lyrics_offsets (
+        track_key TEXT PRIMARY KEY,
+        offset_ms INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS lyrics_generated (
         track_key TEXT PRIMARY KEY,
@@ -101,7 +113,7 @@ impl Database {
     pub fn standard() -> Self {
         let data = dirs::data_local_dir()
             .unwrap_or_else(std::env::temp_dir)
-            .join("SonoraX");
+            .join(crate::profile_folder("SonoraX"));
         Self {
             path: data.join("state.sqlite"),
             ready: Arc::new(Mutex::new(false)),

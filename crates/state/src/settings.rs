@@ -2921,7 +2921,7 @@ fn write_settings(path: &Path, bytes: &[u8]) -> Result<()> {
 fn settings_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("sonora")
+        .join(storage::profile_folder("sonora"))
         .join("settings.json")
 }
 

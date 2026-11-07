@@ -42,7 +42,7 @@ fn cover_path(playlist_id: &str) -> PathBuf {
         .collect();
     dirs::data_local_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("sonora")
+        .join(storage::profile_folder("sonora"))
         .join("playlist-covers")
         .join(format!("{name}-{stamp}.jpg"))
 }

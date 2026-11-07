@@ -30,9 +30,8 @@ pub fn rank(query: &LyricsQuery, hits: Vec<LyricsHit>) -> Vec<LyricsHit> {
 }
 
 /// Ranks hits best first and removes duplicates. Synced lyrics beat plain ones, which beat
-/// cut-short ones. Within one of those kinds the source earlier in `priority` wins, and the match
-/// score, which favours word-by-word timing, settles the rest. Sources missing from `priority`
-/// come after the rest.
+/// cut-short ones. Source priority decides between complete synced sheets; otherwise match
+/// score decides first. Sources missing from `priority` share the lowest priority.
 pub fn rank_with_priority(
     query: &LyricsQuery,
     hits: Vec<LyricsHit>,
@@ -61,8 +60,15 @@ pub fn rank_with_priority(
          (right_grade, right_place, right_score, right)| {
             right_grade
                 .cmp(left_grade)
-                .then_with(|| left_place.cmp(right_place))
+                .then_with(|| {
+                    if *left_grade == 2 {
+                        left_place.cmp(right_place)
+                    } else {
+                        std::cmp::Ordering::Equal
+                    }
+                })
                 .then_with(|| right_score.cmp(left_score))
+                .then_with(|| left_place.cmp(right_place))
                 .then_with(|| left.source.cmp(right.source))
                 .then_with(|| left.title.cmp(&right.title))
         },
@@ -73,6 +79,21 @@ pub fn rank_with_priority(
         .into_iter()
         .map(|(_, _, _, hit)| hit)
         .filter(|hit| seen.insert(fingerprint(&hit.lyrics)))
+        .map(|mut hit| {
+            if hit.source != LOCAL
+                && let Lyrics::Plain {
+                    text,
+                    romanized: None,
+                } = &hit.lyrics
+                && has_thai(text)
+            {
+                let formatted = tidy_stanzas(text);
+                if formatted != *text {
+                    hit.lyrics = Lyrics::plain(formatted);
+                }
+            }
+            hit
+        })
         .collect()
 }
 
@@ -125,6 +146,22 @@ pub fn matched(query: &LyricsQuery, hit: &LyricsHit) -> bool {
 
 pub fn score(query: &LyricsQuery, hit: &LyricsHit) -> i64 {
     let mut score: i64 = i64::from(hit.trust);
+    if query
+        .title
+        .chars()
+        .filter(|ch| thai_letter(*ch))
+        .take(3)
+        .count()
+        == 3
+    {
+        let native = match &hit.lyrics {
+            Lyrics::Plain { text, .. } => has_thai(text),
+            Lyrics::Synced { lines } => lines.iter().any(|line| has_thai(&line.text)),
+        };
+        if native {
+            score += 250;
+        }
+    }
     if let Some(duration) = hit.duration {
         let drift = duration.as_secs().abs_diff(query.duration.as_secs());
         if drift <= CLOSE_ENOUGH {
@@ -180,21 +217,58 @@ fn truncated(lyrics: &Lyrics, duration: Duration) -> bool {
     !duration.is_zero() && span.as_secs_f64() < duration.as_secs_f64() * 0.6
 }
 
+fn thai_letter(ch: char) -> bool {
+    ('\u{0e01}'..='\u{0e2e}').contains(&ch)
+}
+
+fn has_thai(text: &str) -> bool {
+    text.chars().filter(|ch| thai_letter(*ch)).take(3).count() == 3
+}
+
+/// Rejoins short Thai fragments while preserving stanza breaks and timed lines.
+fn tidy_stanzas(text: &str) -> String {
+    let mut output = Vec::new();
+    let mut fragment: Option<&str> = None;
+    for line in text.lines().map(str::trim) {
+        if let Some(short) = fragment.take() {
+            if line
+                .chars()
+                .any(|ch| ('\u{0e01}'..='\u{0e5b}').contains(&ch))
+            {
+                output.push(format!("{short} {line}"));
+                continue;
+            }
+            output.push(short.to_owned());
+        }
+        if !line.is_empty()
+            && line.chars().count() <= 4
+            && line
+                .chars()
+                .all(|ch| ('\u{0e01}'..='\u{0e4e}').contains(&ch))
+        {
+            fragment = Some(line);
+        } else if !line.is_empty() || output.last().is_some_and(|line| !line.is_empty()) {
+            output.push(line.to_owned());
+        }
+    }
+    output.extend(fragment.map(str::to_owned));
+    output.join("\n").trim().to_owned()
+}
+
 fn low_quality(lyrics: &Lyrics) -> bool {
-    let Lyrics::Synced { lines } = lyrics else {
-        return false;
+    let mut total = 0;
+    let mut noisy = 0;
+    let mut inspect = |text: &str| {
+        if !text.trim().is_empty() {
+            total += 1;
+            noisy += usize::from(stretched_shout(text) || text.contains('\u{fffd}'));
+        }
     };
-    let texts = lines.iter().flat_map(|line| {
-        std::iter::once(line.text.as_str()).chain(
-            line.secondary
-                .iter()
-                .map(|secondary| secondary.text.as_str()),
-        )
-    });
-    let (total, noisy) = texts.fold((0usize, 0usize), |(total, noisy), text| {
-        (total + 1, noisy + usize::from(stretched_shout(text)))
-    });
-    noisy >= 3 && noisy.saturating_mul(6) >= total
+    match lyrics {
+        Lyrics::Plain { text, .. } => text.lines().for_each(&mut inspect),
+        Lyrics::Synced { lines } => lines.iter().for_each(|line| inspect(&line.text)),
+    }
+    noisy >= 2 && noisy * 5 >= total
 }
 
 fn stretched_shout(text: &str) -> bool {

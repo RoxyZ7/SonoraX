@@ -26,6 +26,7 @@ pub enum LyricsState {
 
 const SAVE_DELAY: Duration = Duration::from_millis(800);
 const MAX_LRC_BYTES: u64 = 1024 * 1024;
+const MAX_OFFSET_MS: i32 = 15_000;
 
 /// How many tracks keep their answer in memory. The rest are read back from the cache database,
 /// so this only has to cover the track playing, the next one and a few just played.
@@ -43,11 +44,15 @@ pub struct Lyrics {
     recent: VecDeque<(String, Found)>,
     store: Sheets,
     overrides: storage::Database,
+    offset_ms: i32,
+    offset_edit: Option<Task<()>>,
+    offset_revision: u64,
     attached: bool,
     edit: Option<Task<()>>,
     auto: Option<Task<()>>,
     auto_for: Option<String>,
     auto_checked: bool,
+    auto_failed: bool,
     attempted_auto: HashSet<(String, String)>,
     /// Answers found since the last save, written together once lookups go quiet.
     unsaved: Vec<Unsaved>,
@@ -124,11 +129,15 @@ impl Lyrics {
             recent: VecDeque::new(),
             store,
             overrides: storage::Database::standard(),
+            offset_ms: 0,
+            offset_edit: None,
+            offset_revision: 0,
             attached: false,
             edit: None,
             auto: None,
             auto_for: None,
             auto_checked: false,
+            auto_failed: false,
             attempted_auto: HashSet::new(),
             unsaved: Vec::new(),
             providers,
@@ -167,9 +176,23 @@ impl Lyrics {
         self.auto_for.is_some() && self.auto_for == self.following
     }
 
+    /// Whether the current recording could not be aligned with enough confidence.
+    pub fn auto_failed(&self) -> bool {
+        self.auto_failed
+    }
+
     /// Applies an attachment to the track selected when the action began, even if it ends
     /// while the file dialog is open.
     pub fn edit_attachment(&mut self, remove: bool, cx: &mut Context<Self>) {
+        self.change_attachment(remove, None, cx);
+    }
+
+    /// Saves edited text from the clipboard for the currently playing track.
+    pub fn paste_attachment(&mut self, text: String, cx: &mut Context<Self>) {
+        self.change_attachment(false, Some(text), cx);
+    }
+
+    fn change_attachment(&mut self, remove: bool, pasted: Option<String>, cx: &mut Context<Self>) {
         let Some(id) = self.following.as_deref() else {
             return;
         };
@@ -178,7 +201,7 @@ impl Lyrics {
         }
         let key = self.key(id, cx);
         let db = self.overrides.clone();
-        let picker = (!remove).then(|| {
+        let picker = (!remove && pasted.is_none()).then(|| {
             cx.prompt_for_paths(PathPromptOptions {
                 files: true,
                 directories: false,
@@ -199,8 +222,18 @@ impl Lyrics {
                 let key = key.clone();
                 cx.background_spawn(async move {
                     let connection = db.open()?;
-                    if let Some(path) = path {
-                        let lrc = read_attachment(&path)?;
+                    if !remove {
+                        let lrc = match (path, pasted) {
+                            (Some(path), _) => read_attachment(&path)?,
+                            (_, Some(text)) => {
+                                anyhow::ensure!(
+                                    !text.trim().is_empty() && text.len() as u64 <= MAX_LRC_BYTES,
+                                    "personal lyrics are empty or too large"
+                                );
+                                text
+                            }
+                            _ => return Ok(false),
+                        };
                         connection.execute(
                             "INSERT INTO lyrics_overrides (track_key, lrc) VALUES (?1, ?2)
                              ON CONFLICT(track_key) DO UPDATE SET lrc = excluded.lrc",
@@ -270,6 +303,98 @@ impl Lyrics {
         self.revision
     }
 
+    /// A positive offset displays each lyric later in the song.
+    pub fn offset_ms(&self) -> i32 {
+        self.offset_ms
+    }
+
+    pub fn editing_offset(&self) -> bool {
+        self.offset_edit.is_some()
+    }
+
+    pub fn lyric_time(&self, position: Duration) -> Option<Duration> {
+        let offset = Duration::from_millis(u64::from(self.offset_ms.unsigned_abs()));
+        if self.offset_ms < 0 {
+            Some(position.saturating_add(offset))
+        } else {
+            position.checked_sub(offset)
+        }
+    }
+
+    pub fn playback_time(&self, position: Duration) -> Duration {
+        let offset = Duration::from_millis(u64::from(self.offset_ms.unsigned_abs()));
+        if self.offset_ms < 0 {
+            position.saturating_sub(offset)
+        } else {
+            position.saturating_add(offset)
+        }
+    }
+
+    pub fn set_offset(&mut self, offset_ms: i32, cx: &mut Context<Self>) {
+        let offset_ms = offset_ms.clamp(-MAX_OFFSET_MS, MAX_OFFSET_MS);
+        if self.editing_offset()
+            || self.offset_ms == offset_ms
+            || !self.current().is_some_and(|hit| hit.lyrics.synced())
+        {
+            return;
+        }
+        let Some(id) = &self.following else {
+            return;
+        };
+        let key = self.key(id, cx);
+        let stored_key = key.clone();
+        let db = self.overrides.clone();
+        self.offset_edit = Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let connection = db.open()?;
+                    if offset_ms == 0 {
+                        connection.execute(
+                            "DELETE FROM lyrics_offsets WHERE track_key = ?1",
+                            [&stored_key],
+                        )?;
+                    } else {
+                        connection.execute(
+                            "INSERT INTO lyrics_offsets (track_key, offset_ms) VALUES (?1, ?2)
+                             ON CONFLICT(track_key) DO UPDATE SET offset_ms = excluded.offset_ms",
+                            rusqlite::params![stored_key, offset_ms],
+                        )?;
+                    }
+                    Ok::<_, anyhow::Error>(())
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                this.offset_edit = None;
+                match result {
+                    Ok(()) => {
+                        if this
+                            .following
+                            .as_ref()
+                            .is_some_and(|id| this.key(id, cx) == key)
+                        {
+                            this.offset_ms = offset_ms;
+                            this.offset_revision = this.offset_revision.wrapping_add(1);
+                        }
+                    }
+                    Err(error) => {
+                        log::warn!("lyrics: cannot save timing offset: {error:#}");
+                        Toasts::show(Outcome::Failed, "lyrics-offset-save-failed", cx);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    /// Tries the next available sheet without writing over the personal copy.
+    pub fn next_source(&mut self, cx: &mut Context<Self>) {
+        if self.hits.len() > 1 {
+            self.choose((self.chosen + 1) % self.hits.len(), cx);
+        }
+    }
+
     pub fn choose(&mut self, index: usize, cx: &mut Context<Self>) {
         if index >= self.hits.len() || index == self.chosen {
             return;
@@ -285,7 +410,7 @@ impl Lyrics {
             return None;
         };
         let playback = self.playback.read(cx);
-        let position = playback.shown_time(cx).0;
+        let position = self.lyric_time(playback.shown_time(cx).0)?;
         music::lyrics::active(lines, position)
     }
 
@@ -305,7 +430,9 @@ impl Lyrics {
         }
         let (track, id) = (track.clone(), id.to_owned());
         self.following = Some(id.clone());
+        self.offset_ms = 0;
         self.auto_checked = false;
+        self.auto_failed = false;
         self.chosen = 0;
         self.picked = false;
         self.settled = false;
@@ -319,10 +446,20 @@ impl Lyrics {
         }
         let db = self.overrides.clone();
         let key = self.key(&id, cx);
+        let offset_revision = self.offset_revision;
         self.task = Some(cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
                     let connection = db.open()?;
+                    let offset = connection
+                        .query_row(
+                            "SELECT offset_ms FROM lyrics_offsets WHERE track_key = ?1",
+                            [&key],
+                            |row| row.get::<_, i32>(0),
+                        )
+                        .optional()?
+                        .unwrap_or_default()
+                        .clamp(-MAX_OFFSET_MS, MAX_OFFSET_MS);
                     let lrc: Option<String> = connection
                         .query_row(
                             "SELECT lrc FROM lyrics_overrides WHERE track_key = ?1",
@@ -330,13 +467,27 @@ impl Lyrics {
                             |row| row.get(0),
                         )
                         .optional()?;
-                    Ok::<_, anyhow::Error>(lrc.as_deref().and_then(attachment_lyrics))
+                    Ok::<_, anyhow::Error>((
+                        offset,
+                        lrc.as_deref()
+                            .filter(|text| !text.trim().is_empty())
+                            .map(|text| {
+                                attachment_lyrics(text)
+                                    .unwrap_or_else(|| music::Lyrics::plain(text))
+                            }),
+                    ))
                 })
                 .await;
             this.update(cx, |this, cx| {
                 if !this.finished(&id) {
                     return;
                 }
+                let result = result.map(|(offset, attachment)| {
+                    if this.offset_revision == offset_revision {
+                        this.offset_ms = offset;
+                    }
+                    attachment
+                });
                 match result {
                     Ok(Some(lyrics)) => {
                         this.attached = true;
@@ -438,6 +589,7 @@ impl Lyrics {
         let vault = player.vault().clone();
         let db = self.overrides.clone();
         let for_audio = id.clone();
+        let attempt = (key.clone(), version.clone());
         if generate {
             self.auto_for = Some(id.clone());
         }
@@ -454,10 +606,10 @@ impl Lyrics {
                 let (Some(client), true) = (client, generate) else {
                     return Ok(None);
                 };
+                let engine = lyrics_auto::ensure_engine().await?;
                 let Some(pcm) = client.lyrics_audio(&for_audio, quality, &vault).await? else {
                     return Ok(None);
                 };
-                let engine = lyrics_auto::ensure_engine().await?;
                 tokio::task::spawn_blocking(move || {
                     let Some(lrc) = lyrics_auto::generate(&engine, &pcm, &text)? else {
                         return Ok(None);
@@ -470,6 +622,9 @@ impl Lyrics {
             move |this, result: anyhow::Result<Option<music::Lyrics>>, cx| {
                 this.auto = None;
                 this.auto_for = None;
+                if generate && this.following.as_deref() == Some(id.as_str()) {
+                    this.auto_failed = !matches!(&result, Ok(Some(_)));
+                }
                 match result {
                     Ok(Some(lyrics))
                         if this.following.as_deref() == Some(id.as_str())
@@ -488,7 +643,10 @@ impl Lyrics {
                         this.chosen = 0;
                         this.revision = this.revision.wrapping_add(1);
                     }
-                    Err(error) => log::debug!("lyrics: automatic alignment unavailable: {error:#}"),
+                    Err(error) => {
+                        this.attempted_auto.remove(&attempt);
+                        log::debug!("lyrics: automatic alignment unavailable: {error:#}");
+                    }
                     _ => {}
                 }
                 cx.notify();
@@ -598,6 +756,7 @@ impl Lyrics {
         }
         self.task = None;
         self.following = None;
+        self.offset_ms = 0;
         self.hits.clear();
         self.chosen = 0;
         self.picked = false;
@@ -722,15 +881,7 @@ impl Lyrics {
                     synced = best.lyrics.synced();
                     displayed = Some(best);
                 }
-                // Full synced lyrics can only lose to a source ranked higher, anything else to
-                // whichever source answers next.
-                let waiting = displayed.as_ref().is_some_and(|displayed| {
-                    let place = match music::lyrics::fully_synced(&ranking, &displayed.lyrics) {
-                        true => rank_in(&priority, displayed.source),
-                        false => usize::MAX,
-                    };
-                    pending.iter().any(|name| rank_in(&priority, name) < place)
-                });
+                let waiting = !pending.is_empty();
                 let anchor = displayed.clone();
                 this.update(cx, |this, cx| {
                     if this.following.as_deref() != Some(id.as_str()) {
@@ -752,7 +903,7 @@ impl Lyrics {
                         if current {
                             let instrumental = music::lyrics::instrumental(&ranking, &hits);
                             let ranked = ordered(&ranking, hits, &priority);
-                            this.settle(ranked, displayed.as_ref(), instrumental, cx);
+                            this.settle(ranked, None, instrumental, cx);
                         }
                     }
                     Err(error) => {
@@ -865,8 +1016,7 @@ impl Lyrics {
         self.hold(id, found);
     }
 
-    /// Puts up the answer once every source has replied. Unless a word-by-word sheet already
-    /// settled the question, this is the best there is and nothing may replace it afterwards.
+    /// Applies the final ranking when the source lookup finishes, keeping a manual selection.
     fn settle(
         &mut self,
         ranked: Vec<LyricsHit>,
@@ -874,12 +1024,10 @@ impl Lyrics {
         instrumental: bool,
         cx: &mut Context<Self>,
     ) {
-        if !self.settled {
-            log::debug!("lyrics: settling on the best answer");
-            self.settled = true;
-            self.pin(ranked, displayed);
-            self.state = state_for(&self.hits, instrumental);
-        }
+        log::debug!("lyrics: settling on the best answer");
+        self.settled = true;
+        self.pin(ranked, displayed);
+        self.state = state_for(&self.hits, instrumental);
         cx.notify();
         self.prefetch(cx);
         self.maybe_auto(cx);
@@ -976,14 +1124,6 @@ fn ordered(query: &LyricsQuery, hits: Vec<LyricsHit>, priority: &[String]) -> Ve
 /// Hits sent to a lookup, with the provider that has now answered. Hits held from an earlier
 /// lookup come with no provider.
 type Reply = (Option<&'static str>, Vec<LyricsHit>);
-
-/// Where `source` stands in the user's priority. Sources missing from it come last.
-fn rank_in(priority: &[String], source: &str) -> usize {
-    priority
-        .iter()
-        .position(|name| name == source)
-        .unwrap_or(priority.len())
-}
 
 /// What the services have said about one track: every hit matched to it, unranked and from every
 /// source, and the services that replied. The selection is applied when it is shown.

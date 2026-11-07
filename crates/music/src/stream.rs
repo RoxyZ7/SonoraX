@@ -716,7 +716,7 @@ fn announced(total: Option<u64>, ceiling: usize) -> Option<usize> {
 fn spool_file() -> io::Result<File> {
     let folder = dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("sonora");
+        .join(storage::profile_folder("sonora"));
     std::fs::create_dir_all(&folder)?;
     tempfile::tempfile_in(folder)
 }

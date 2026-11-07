@@ -76,6 +76,7 @@ pub(crate) struct TrackColumns {
 pub(crate) struct ItemMenu {
     playlist_submenu: SubmenuState,
     artist_submenu: SubmenuState,
+    service_submenu: SubmenuState,
     playlist_scrollbar: Entity<Scrollbar>,
     playlist_search: MenuSearch,
 }
@@ -85,6 +86,7 @@ impl ItemMenu {
         Self {
             playlist_submenu: SubmenuState::default(),
             artist_submenu: SubmenuState::default(),
+            service_submenu: SubmenuState::default(),
             playlist_scrollbar,
             playlist_search: MenuSearch::new("menu-search-playlists", cx),
         }
@@ -94,6 +96,7 @@ impl ItemMenu {
         self.playlist_submenu.reset();
         self.playlist_search.reset();
         self.artist_submenu.reset();
+        self.service_submenu.reset();
         self.playlist_scrollbar
             .read(cx)
             .scroll()
@@ -120,6 +123,20 @@ impl ItemMenu {
         };
         let editing = state.editing_attachment();
         let attached = state.has_attachment();
+        let offset = state.offset_ms();
+        let offset_action = |key, label, value, disabled| {
+            let lyrics = lyrics.clone();
+            let id = id.clone();
+            MenuItem::new(key, label)
+                .when(state.editing_offset() || disabled, MenuItem::disabled)
+                .on_click(move |_, _, cx| {
+                    lyrics.update(cx, |lyrics, cx| {
+                        if lyrics.following() == Some(id.as_str()) {
+                            lyrics.set_offset(value, cx);
+                        }
+                    });
+                })
+        };
         let auto_choice = state
             .hits()
             .iter()
@@ -146,6 +163,85 @@ impl ItemMenu {
                 })
         };
         menu.item(MenuItem::separator("lyrics-file-section"))
+            .when(
+                state.current().is_some_and(|hit| hit.lyrics.synced()),
+                |menu| {
+                    menu.item(offset_action(
+                        "lyrics-offset-earlier",
+                        t!("lyrics-offset-earlier"),
+                        offset - 250,
+                        false,
+                    ))
+                    .item(offset_action(
+                        "lyrics-offset-later",
+                        t!("lyrics-offset-later"),
+                        offset + 250,
+                        false,
+                    ))
+                    .item(offset_action(
+                        "lyrics-offset-reset",
+                        t!("lyrics-offset-reset", offset = format!("{offset:+}")),
+                        0,
+                        offset == 0,
+                    ))
+                },
+            )
+            .item({
+                let lyrics = lyrics.clone();
+                let id = id.clone();
+                MenuItem::new("lyrics-doctor-next", t!("dev-lyrics-next"))
+                    .when(state.hits().len() < 2, MenuItem::disabled)
+                    .on_click(move |_, _, cx| {
+                        lyrics.update(cx, |lyrics, cx| {
+                            if lyrics.following() == Some(id.as_str()) {
+                                lyrics.next_source(cx);
+                            }
+                        })
+                    })
+            })
+            .when_some(state.current(), |menu, hit| {
+                let text = match &hit.lyrics {
+                    music::Lyrics::Plain { text, .. } => text.clone(),
+                    music::Lyrics::Synced { lines } => lines
+                        .iter()
+                        .map(|line| {
+                            let ms = line.start.as_millis();
+                            format!(
+                                "[{:02}:{:02}.{:03}]{}",
+                                ms / 60_000,
+                                ms / 1000 % 60,
+                                ms % 1000,
+                                line.text
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                };
+                menu.item(
+                    MenuItem::new("lyrics-personal-copy", t!("dev-lyrics-copy")).on_click(
+                        move |_, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))
+                        },
+                    ),
+                )
+            })
+            .item({
+                let lyrics = lyrics.clone();
+                let id = id.clone();
+                MenuItem::new("lyrics-personal-paste", t!("dev-lyrics-paste"))
+                    .when(editing, MenuItem::disabled)
+                    .on_click(move |_, _, cx| {
+                        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text())
+                        else {
+                            return;
+                        };
+                        lyrics.update(cx, |lyrics, cx| {
+                            if lyrics.following() == Some(id.as_str()) {
+                                lyrics.paste_attachment(text, cx);
+                            }
+                        });
+                    })
+            })
             .item(action(
                 "lyrics-file-choose",
                 if attached {
@@ -466,6 +562,52 @@ impl ItemMenu {
                     .disabled(),
             ),
         };
+        let similar = (!many && !imported && stations && track.playable && track.id.is_some())
+            .then(|| {
+                let seed = track.clone();
+                MenuItem::new("queue-similar", t!("dev-queue-similar")).on_click(move |_, _, cx| {
+                    let playback = Sonora::global(cx).playback.clone();
+                    playback.update(cx, |playback, cx| playback.queue_similar(&seed, cx));
+                })
+            });
+        let elsewhere = (!many).then(|| {
+            let query = music::escape::component(&format!("{} {}", track.name, track.artists));
+            let services = Menu::new("track-services").items(
+                [
+                    (
+                        "find-youtube",
+                        "YouTube Music",
+                        format!("https://music.youtube.com/search?q={query}"),
+                    ),
+                    (
+                        "find-spotify",
+                        "Spotify",
+                        format!("https://open.spotify.com/search/{query}"),
+                    ),
+                    (
+                        "find-apple",
+                        "Apple Music",
+                        format!("https://music.apple.com/search?term={query}"),
+                    ),
+                    (
+                        "find-deezer",
+                        "Deezer",
+                        format!("https://www.deezer.com/search/{query}"),
+                    ),
+                    (
+                        "find-tidal",
+                        "TIDAL",
+                        format!("https://tidal.com/search?q={query}"),
+                    ),
+                ]
+                .into_iter()
+                .map(|(id, name, url)| {
+                    MenuItem::new(id, name).on_click(move |_, _, cx| cx.open_url(&url))
+                }),
+            );
+            MenuItem::new("find-versions", t!("dev-find-versions"))
+                .submenu(services, self.service_submenu.clone())
+        });
         let album = match (many, columns.album, track.album_id.clone()) {
             (true, _, _) | (false, true, _) => None,
             (false, false, Some(id)) if Some(id.as_str()) == current_album => None,
@@ -578,7 +720,13 @@ impl ItemMenu {
             vec![
                 add_to_playlist.into_iter().chain(library_action).collect(),
                 vec![next, queue, last],
-                album.into_iter().chain(artist).chain(radio).collect(),
+                album
+                    .into_iter()
+                    .chain(artist)
+                    .chain(radio)
+                    .chain(similar)
+                    .chain(elsewhere)
+                    .collect(),
                 details
                     .into_iter()
                     .chain(edit)

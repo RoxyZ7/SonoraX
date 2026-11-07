@@ -184,5 +184,9 @@ fn write_file(master: &[u8]) -> Result<()> {
 /// The key file sits in the data folder rather than in the cache folder, so clearing or copying
 /// the cache alone never carries the key with it. The downloads share the data folder.
 fn key_file() -> Option<PathBuf> {
-    Some(dirs::data_local_dir()?.join("sonora").join("vault.key"))
+    Some(
+        dirs::data_local_dir()?
+            .join(storage::profile_folder("sonora"))
+            .join("vault.key"),
+    )
 }

@@ -154,6 +154,49 @@ impl HistoryView {
             .into_any_element()
     }
 
+    /// Groups recent listening history by local calendar month.
+    fn timeline(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let zone = jiff::tz::TimeZone::system();
+        let mut months = std::collections::BTreeMap::<String, Vec<Track>>::new();
+        for track in self.history.read(cx).tracks() {
+            if let Some(stamp) = track
+                .added_at
+                .and_then(|at| jiff::Timestamp::new(at, 0).ok())
+            {
+                let key = stamp.to_zoned(zone.clone()).strftime("%Y-%m").to_string();
+                months.entry(key).or_default().push(track.clone());
+            }
+        }
+        let gap = cx.theme().metrics.inset / 2.;
+        div()
+            .flex()
+            .flex_col()
+            .gap(gap)
+            .when(!months.is_empty(), |section| {
+                section.child(t!("dev-history-timeline")).child(
+                    div().flex().flex_wrap().gap(gap).children(
+                        months.into_iter().rev().take(12).map(|(month, tracks)| {
+                            let label = month.as_str();
+                            let count = tracks.len();
+                            Button::new(format!("history-month-{month}"))
+                                .outline()
+                                .label(t!("dev-history-month", month = label, count = count))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.playback.update(cx, |playback, cx| {
+                                        playback.enqueue_tracks(
+                                            tracks.clone(),
+                                            None,
+                                            state::QueuePlacement::End,
+                                            cx,
+                                        );
+                                    });
+                                }))
+                        }),
+                    ),
+                )
+            })
+    }
+
     fn confirmation(&self, cx: &mut Context<Self>) -> impl IntoElement {
         Modal::new("clear-history", t!("history-clear-title"))
             .detail(t!("history-clear-confirm"))
@@ -202,6 +245,7 @@ impl Render for HistoryView {
             .pt(inset)
             .pb(inset)
             .child(div().px(inset).child(self.header(cx)))
+            .child(div().px(inset).pb(inset).child(self.timeline(cx)))
             .child(table(&self.table))
             .when_some(note, |this, note| {
                 this.child(

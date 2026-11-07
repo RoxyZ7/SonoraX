@@ -253,7 +253,7 @@ impl Search {
 
             let songs = {
                 let client = client.clone();
-                let asked = query.clone();
+                let asked = catalog_query(&query);
                 io.spawn(async move { client.search(&asked).await })
             };
             let albums = {
@@ -692,6 +692,64 @@ fn kept(library: &[Track], track: &Track) -> bool {
         .is_some_and(|id| library.iter().any(|kept| kept.id.as_ref() == Some(id)))
 }
 
+/// Converts an explicit mood search into a music query the active provider can answer.
+fn catalog_query(query: &str) -> String {
+    let Some(mood) = query
+        .strip_prefix("อารมณ์:")
+        .or_else(|| query.strip_prefix("mood:"))
+    else {
+        return query.to_owned();
+    };
+    let mood = mood.trim();
+    let mut prompt = mood.to_owned();
+    for (cue, keywords) in [
+        ("ฝน", "ฝนตก acoustic"),
+        ("โฟกัส", "สมาธิ instrumental"),
+        ("ทำงาน", "focus lo-fi"),
+        ("ขับรถ", "road trip"),
+        ("ออกกำลัง", "workout upbeat"),
+        ("นอน", "sleep ambient"),
+        ("ไม่เศร้า", "ฟังสบาย feel good"),
+    ] {
+        if mood.contains(cue) {
+            prompt.push(' ');
+            prompt.push_str(keywords);
+        }
+    }
+    format!("{prompt} music")
+}
+
+fn thai(ch: char) -> bool {
+    ('\u{0e01}'..='\u{0e4e}').contains(&ch)
+}
+
+/// Keeps Thai vowels and consonants while allowing omitted tone marks and spaces.
+fn compact_thai(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| !matches!(ch, '\u{0e48}'..='\u{0e4b}'))
+        .filter(|ch| thai(*ch) || ch.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Allows one insertion, deletion or substitution in a Thai query term.
+fn near_thai(value: &str, term: &str) -> bool {
+    let (mut a, mut b): (Vec<_>, Vec<_>) = (value.chars().collect(), term.chars().collect());
+    if b.len() < 5 || a.len().abs_diff(b.len()) > 1 {
+        return false;
+    }
+    if a.len() > b.len() {
+        std::mem::swap(&mut a, &mut b);
+    }
+    let common = a.iter().zip(&b).take_while(|(a, b)| a == b).count();
+    if common == a.len() {
+        return true;
+    }
+    let skip = usize::from(a.len() == b.len());
+    a[common + skip..] == b[common + 1..]
+}
+
 fn score(value: &str, term: &str) -> u32 {
     let value = value.trim().to_lowercase();
     if value == term {
@@ -703,10 +761,29 @@ fn score(value: &str, term: &str) -> u32 {
     if value.split_whitespace().any(|word| word.starts_with(term)) {
         return WORD;
     }
-    match value.contains(term) {
-        true => INSIDE,
-        false => 0,
+    if value.contains(term) {
+        return INSIDE;
     }
+    if !term.chars().any(thai) {
+        return 0;
+    }
+    let folded = compact_thai(term);
+    if folded.is_empty() {
+        return 0;
+    }
+    let joined = compact_thai(&value);
+    if joined == folded {
+        return PREFIX;
+    }
+    if joined.contains(&folded)
+        || value
+            .split_whitespace()
+            .any(|word| near_thai(&compact_thai(word), &folded))
+        || near_thai(&joined, &folded)
+    {
+        return INSIDE;
+    }
+    0
 }
 
 fn fit(fields: &[(u32, &str)], query: &Query) -> Option<u32> {
@@ -719,13 +796,17 @@ fn fit(fields: &[(u32, &str)], query: &Query) -> Option<u32> {
             .unwrap_or(0)
     };
 
+    let whole = best(&query.whole) * 100 / ceiling;
     let spread = query.terms.iter().try_fold(0, |total, term| {
         let hit = best(term);
         (hit > 0).then_some(total + hit)
-    })?;
+    });
+    let Some(spread) = spread else {
+        return (whole > 0 && query.whole.chars().any(thai)).then_some(whole.min(100));
+    };
     let mean = spread * 100 / (ceiling * query.terms.len() as u32);
 
-    Some(mean.max(best(&query.whole) * 100 / ceiling).min(100))
+    Some(mean.max(whole).min(100))
 }
 
 fn named(value: &str, query: &Query) -> Option<u32> {

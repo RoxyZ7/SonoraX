@@ -454,7 +454,7 @@ home-artists = Artists
 home-collection-albums = Albums from your collection
 
 # search page
-search-placeholder = What do you want to listen to?
+search-placeholder = Find a song, or type mood: rainy night
 search-browse = Browse all
 search-submit = Search
 search-recent = Recent searches
@@ -1256,7 +1256,8 @@ toast-unpinned = Unpinned { $name }
 # lyrics
 lyrics-title = Lyrics
 lyrics-untimed = Unsynced lyrics
-lyrics-auto-working = Syncing lyrics…
+lyrics-auto-working = Timing lyrics on this device…
+lyrics-auto-unavailable = Could not time these lyrics automatically
 lyrics-auto-credit = Lyrics synced on this device
 lyrics-file-add = Add .lrc
 lyrics-file-replace = Change .lrc
@@ -1453,3 +1454,16 @@ response-graph-readout = { $frequency } · { $direction ->
         [down] -{ $gain }
        *[flat] { $gain }
     } dB
+
+dev-lyrics-next = Lyrics Doctor · Try another source
+lyrics-offset-earlier = Show lyrics 250 ms earlier
+lyrics-offset-later = Show lyrics 250 ms later
+lyrics-offset-reset = Reset lyrics timing ({ $offset } ms)
+lyrics-offset-save-failed = Couldn't save the lyrics timing
+dev-lyrics-paste = Save clipboard as personal lyrics
+dev-queue-similar = Play compatible songs next
+dev-find-versions = Find this song on another service
+dev-history-timeline = Listening timeline · Add a month to the queue
+dev-history-month = { $month } · { $count } songs
+dev-lyrics-copy = Copy lyrics for editing
+dev-updates-disabled = Updates are disabled for this Dev build

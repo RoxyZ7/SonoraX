@@ -96,13 +96,14 @@ pub(crate) async fn ensure_engine() -> Result<PathBuf> {
         .user_agent(concat!("SonoraX/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(30 * 60))
         .build()?;
-    let tag = match crate::VERSION.contains("-nightly") {
-        true => "nightly".to_owned(),
-        false if crate::VERSION == env!("CARGO_PKG_VERSION") => "latest".to_owned(),
-        false => format!("v{}", crate::VERSION),
+    // Preview versions have no published tag. The engine is shared by stable and Dev.
+    let release_path = if crate::VERSION.contains("-nightly") {
+        "tags/nightly"
+    } else {
+        "latest"
     };
     let release: Published = client
-        .get(format!("{RELEASES}/{tag}"))
+        .get(format!("{RELEASES}/{release_path}"))
         .header("Accept", "application/vnd.github+json")
         .send()
         .await?
@@ -115,10 +116,14 @@ pub(crate) async fn ensure_engine() -> Result<PathBuf> {
         .iter()
         .find(|asset| asset.name == archive_name)
         .context("this release has no lyrics engine for the current platform")?;
-    let checksums_url =
-        format!("https://github.com/RoxyZ7/SonoraX/releases/download/{tag}/SHA256SUMS");
+    let checksums_url = &release
+        .assets
+        .iter()
+        .find(|asset| asset.name == "SHA256SUMS")
+        .context("this release has no checksums")?
+        .browser_download_url;
     let checksums = client
-        .get(checksums_url)
+        .get(checksums_url.as_str())
         .send()
         .await?
         .error_for_status()?
@@ -247,7 +252,7 @@ fn extract_engine(archive: &[u8], destination: &Path) -> Result<()> {
 
 /// Invalidates a timing if the lyrics text or the alignment implementation changes.
 pub(crate) fn fingerprint(text: &str) -> String {
-    format!("v1:{:x}", Sha256::digest(text.as_bytes()))
+    format!("v2:{:x}", Sha256::digest(text.as_bytes()))
 }
 
 pub(crate) fn cached(db: &Database, key: &str, version: &str) -> Result<Option<String>> {
@@ -281,6 +286,10 @@ pub(crate) fn generate(engine: &Path, pcm: &[i16], text: &str) -> Result<Option<
         .filter(|&c| matches!(c, '\u{0e01}'..='\u{0e4e}'))
         .count()
         >= 8;
+    // Keep half the logical cores available for playback and the rest of the desktop.
+    let threads = std::thread::available_parallelism()
+        .map_or(2, |count| (count.get() / 2).clamp(1, 6))
+        .to_string();
     let mut command = Command::new(engine);
     command
         .current_dir(engine.parent().context("missing lyrics engine folder")?)
@@ -288,7 +297,11 @@ pub(crate) fn generate(engine: &Path, pcm: &[i16], text: &str) -> Result<Option<
             "-m",
             MODEL,
             "-t",
-            "2",
+            &threads,
+            "-bs",
+            "1",
+            "-bo",
+            "1",
             "-ng",
             "-l",
             if thai { "th" } else { "auto" },
@@ -326,7 +339,8 @@ pub(crate) fn generate(engine: &Path, pcm: &[i16], text: &str) -> Result<Option<
     }
     let transcript: Transcript =
         serde_json::from_reader(std::fs::File::open(output.with_extension("json"))?)?;
-    Ok(align(transcript, text))
+    let duration_ms = (pcm.len() as u64 * 1_000 / u64::from(RATE)) as i64;
+    Ok(align(transcript, text, duration_ms))
 }
 
 /// Writes the recognizer's 16-bit mono WAV input.
@@ -352,14 +366,18 @@ fn wav(path: &Path, pcm: &[i16]) -> Result<()> {
     Ok(())
 }
 
+/// Normalizes matching text without changing the displayed lyrics.
 fn letters(text: &str) -> impl Iterator<Item = char> + '_ {
     text.chars()
-        .filter(|c| c.is_alphanumeric())
+        .filter(|c| !matches!(c, '\u{0e48}'..='\u{0e4b}' | '\u{0e4c}'))
+        .filter(|c| {
+            c.is_alphanumeric() || matches!(c, '\u{0e31}' | '\u{0e34}'..='\u{0e3a}' | '\u{0e47}')
+        })
         .flat_map(char::to_lowercase)
 }
 
-/// Matches each lyric against the next stretch of recognized vocals, in song order.
-fn align(transcript: Transcript, text: &str) -> Option<String> {
+/// Uses reliable recognition hits as anchors and interpolates short gaps between them.
+fn align(transcript: Transcript, text: &str, duration_ms: i64) -> Option<String> {
     let mut chars = Vec::new();
     let mut time = Vec::new();
     for token in transcript
@@ -369,7 +387,7 @@ fn align(transcript: Transcript, text: &str) -> Option<String> {
     {
         let Some(offsets) = token
             .offsets
-            .filter(|span| span.from >= 0 && span.to >= span.from)
+            .filter(|span| span.from >= 0 && span.to >= span.from && span.from < duration_ms)
         else {
             continue;
         };
@@ -378,44 +396,100 @@ fn align(transcript: Transcript, text: &str) -> Option<String> {
         }
         for letter in letters(&token.text) {
             chars.push(letter);
-            time.push(offsets.from);
+            time.push(offsets.from.max(time.last().copied().unwrap_or(0)));
         }
     }
+    let lines: Vec<_> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let mut anchors = Vec::new();
     let mut cursor = 0;
     let mut last = -1;
-    let mut eligible = 0;
-    let mut consecutive_misses = 0;
-    let mut matched = Vec::new();
-    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+    for (index, line) in lines.iter().enumerate() {
         let target: Vec<_> = letters(line).collect();
-        if target.len() < 2 {
+        if target.len() < 2 || cursor >= chars.len() {
             continue;
         }
-        eligible += 1;
-        let end = (cursor + target.len() * 2 + 120).min(chars.len());
-        let remaining = &chars[cursor..end];
-        let position = match_line(&target, remaining);
-        match position {
-            Some((start, end)) if time[cursor + start] > last => {
-                last = time[cursor + start];
-                cursor += end;
-                consecutive_misses = 0;
-                matched.push(format!(
-                    "[{:02}:{:02}.{:02}]{line}",
-                    last / 60_000,
-                    last / 1_000 % 60,
-                    last / 10 % 100
-                ));
-            }
-            _ => {
-                consecutive_misses += 1;
-                if consecutive_misses > 2 {
-                    return None;
-                }
-            }
+        let missed = anchors.last().map_or(index, |&(at, _)| index - at - 1);
+        let until = last.max(0)
+            + if anchors.is_empty() {
+                80_000
+            } else {
+                28_000 + (missed.min(5) as i64 * 6_000)
+            };
+        let end = time
+            .partition_point(|&stamp| stamp <= until)
+            .min(cursor + target.len() * 2 + 120 + missed.min(5) * 45);
+        if end <= cursor {
+            continue;
+        }
+        let Some((start, end)) = match_line(&target, &chars[cursor..end]) else {
+            continue;
+        };
+        let at = time[cursor + start];
+        if at > last {
+            last = at;
+            anchors.push((index, at));
+            cursor = (cursor + end).max(time.partition_point(|&stamp| stamp <= last));
         }
     }
-    (matched.len() >= 4 && matched.len() * 100 >= eligible * 85).then(|| matched.join("\n"))
+
+    let (first, first_at) = *anchors.first()?;
+    let (last, last_at) = *anchors.last()?;
+    let enough = anchors.len() >= 4 && anchors.len() * 2 >= lines.len();
+    let covers = first <= 3
+        && lines.len() - 1 - last <= 3
+        && last_at - first_at >= duration_ms / 3
+        && anchors.windows(2).all(|pair| pair[1].0 - pair[0].0 <= 6);
+    if !enough || !covers {
+        log::debug!(
+            "lyrics: recognizer aligned {}/{} lines, too few usable anchors",
+            anchors.len(),
+            lines.len()
+        );
+        return None;
+    }
+    let mut stamps = vec![0; lines.len()];
+    let interval = ((last_at - first_at) / (last - first) as i64).clamp(700, 5_000);
+    for (index, stamp) in stamps[..first].iter_mut().enumerate() {
+        let step = (first_at / first.max(1) as i64).min(interval);
+        *stamp = first_at - (first - index) as i64 * step;
+    }
+    for pair in anchors.windows(2) {
+        let [(from, start), (to, end)] = [pair[0], pair[1]];
+        for (offset, stamp) in stamps[from..to].iter_mut().enumerate() {
+            *stamp = start + (end - start) * offset as i64 / (to - from) as i64;
+        }
+    }
+    let tail_step = ((duration_ms - last_at) / (lines.len() - last) as i64).min(interval);
+    for (offset, stamp) in stamps[last..].iter_mut().enumerate() {
+        *stamp = last_at + offset as i64 * tail_step;
+    }
+    if !stamps.windows(2).all(|pair| pair[0] < pair[1]) {
+        return None;
+    }
+    log::debug!(
+        "lyrics: matched {}/{} lines and filled short gaps",
+        anchors.len(),
+        lines.len()
+    );
+    Some(
+        lines
+            .iter()
+            .zip(stamps)
+            .map(|(line, ms)| {
+                format!(
+                    "[{:02}:{:02}.{:03}]{line}",
+                    ms / 60_000,
+                    ms / 1_000 % 60,
+                    ms % 1_000
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }
 
 /// Finds the lowest edit cost for the line in a bounded window, preferring an earlier match.
@@ -451,7 +525,7 @@ fn match_line(needle: &[char], haystack: &[char]) -> Option<(usize, usize)> {
     previous
         .into_iter()
         .enumerate()
-        .filter(|(end, (cost, start))| end > start && *cost * 4 <= needle.len())
+        .filter(|(end, (cost, start))| end > start && *cost * 3 <= needle.len())
         .min_by_key(|(end, (cost, start))| (cost * 8 + start / 8, *end))
         .map(|(end, (_, start))| (start, end))
 }

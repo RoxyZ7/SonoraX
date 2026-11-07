@@ -17,6 +17,8 @@ const RELEASES_PAGE: &str = "https://github.com/RoxyZ7/SonoraX/releases";
 const SUMS: &str = "SHA256SUMS";
 const CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 /// What the nightly workflow puts before the version label in the nightly release's title.
+const NIGHTLY_TITLE: &str = "Nightly ";
+
 /// The version this build shows and reports. The nightly workflow sets `SONORA_VERSION` at
 /// compile time to a label such as `0.44.2-nightly.20261026`, and every other build falls back
 /// to the Cargo version.
@@ -83,7 +85,7 @@ impl Channel {
 /// Whether this copy of Sonora installs its own updates, which is when a channel can be chosen.
 /// A copy a package manager installed, or a portable one, does not.
 pub fn updates_itself() -> bool {
-    Install::current().updates_itself()
+    !VERSION.ends_with("-dev") && Install::current().updates_itself()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -208,6 +210,9 @@ impl Updates {
 
     /// Asks GitHub for the newest stable SonoraX build.
     fn look(&mut self, cx: &mut Context<Self>) {
+        if VERSION.ends_with("-dev") {
+            return;
+        }
         let channel = match updates_itself() {
             true => self.channel,
             false if Channel::running() == Channel::Stable => Channel::Stable,
@@ -246,6 +251,7 @@ impl Updates {
 #[derive(Deserialize)]
 struct Published {
     tag_name: String,
+    name: Option<String>,
     html_url: String,
     #[serde(default)]
     assets: Vec<Asset>,
@@ -272,8 +278,21 @@ async fn latest(http: &reqwest::Client, channel: Channel) -> Result<Option<Relea
         .await
         .context("cannot read the github release")?;
 
-    let version = published.tag_name.trim_start_matches('v').to_owned();
-    if !wanted(channel, &version) {
+    let version = match channel {
+        Channel::Stable => published.tag_name.trim_start_matches('v'),
+        Channel::Nightly => {
+            let Some(version) = published
+                .name
+                .as_deref()
+                .and_then(|name| name.strip_prefix(NIGHTLY_TITLE))
+                .filter(|version| ordered(version).is_some())
+            else {
+                return Ok(None);
+            };
+            version
+        }
+    };
+    if !wanted(channel, version) {
         return Ok(None);
     }
     let install = Install::current();
@@ -289,7 +308,7 @@ async fn latest(http: &reqwest::Client, channel: Channel) -> Result<Option<Relea
         .map(|asset| asset.browser_download_url.clone());
 
     Ok(Some(Release {
-        version,
+        version: version.to_owned(),
         page: published.html_url,
         package,
         sums,

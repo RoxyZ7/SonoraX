@@ -50,6 +50,8 @@ pub(crate) struct Ambient {
     painted: Option<[Hsla; COLORS]>,
     /// Whether a wait for the next drift frame is already running.
     pacing: bool,
+    audio: Option<music::Listening>,
+    pulse: f32,
     /// The palette of the cover a framed field follows, `None` for the one behind the window.
     framed: Option<Sampled>,
 }
@@ -75,6 +77,8 @@ impl Ambient {
             stepped: now,
             painted: None,
             pacing: false,
+            audio: None,
+            pulse: 0.,
             framed: None,
         }
     }
@@ -238,6 +242,15 @@ impl Render for Ambient {
             }
             false => 0.,
         };
+        let spectrum = (animates && self.framed.is_none())
+            .then(|| Sonora::global(cx).playback.read(cx))
+            .filter(|playback| playback.wants_playing())
+            .and_then(|playback| playback.spectrum(cx));
+        self.audio = spectrum.as_ref().map(music::Spectrum::listen);
+        let energy = spectrum.map_or(0., |spectrum| {
+            spectrum.bands().into_iter().take(6).fold(0., f32::max)
+        });
+        self.pulse += (energy.clamp(0., 1.) - self.pulse) * 0.2;
         let colors = self.wash(Self::colors(&theme), animates);
         // The field stands in for the page rather than sitting on it, so it carries the
         // window's own opacity and `Root` paints no background beneath it.
@@ -252,12 +265,17 @@ impl Render for Ambient {
             Some(_) => None,
         };
 
-        let waves = ui::Waves::new(layered(colors).map(shaded))
-            .stage(shaded(Hsla {
-                a: 1.,
-                ..theme.background
-            }))
-            .time(elapsed);
+        let pulse = if animates { self.pulse } else { 0. };
+        let waves = ui::Waves::new(layered(colors).map(|color| {
+            let mut color = shaded(color);
+            color.l = (color.l + pulse * 0.045).min(1.);
+            color
+        }))
+        .stage(shaded(Hsla {
+            a: 1.,
+            ..theme.background
+        }))
+        .time(elapsed);
 
         div()
             .id("ambient")

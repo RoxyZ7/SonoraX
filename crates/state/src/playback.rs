@@ -468,6 +468,7 @@ pub struct Playback {
     load: Option<Task<()>>,
     /// The collection being fetched to start or extend the queue.
     fetch: Option<Task<()>>,
+    similar: Option<Task<()>>,
     enqueue: Option<Task<()>>,
     suggest: Option<Task<()>>,
     /// The track the engine was asked to fetch ahead, so it is asked once.
@@ -638,6 +639,7 @@ impl Playback {
             local_task: None,
             load: None,
             fetch: None,
+            similar: None,
             enqueue: None,
             suggest: None,
             preloaded: None,
@@ -1043,6 +1045,57 @@ impl Playback {
             true => fastrand::choice(&playable).copied(),
             false => playable.first().copied(),
         }
+    }
+
+    /// Queues nearby tracks from the provider's radio without interrupting playback.
+    pub fn queue_similar(&mut self, seed: &Track, cx: &mut Context<Self>) {
+        let Some(id) = seed.id.clone() else { return };
+        let Some(client) = self.client_for(&id, cx) else {
+            return;
+        };
+        let provider = self.session.read(cx).provider_slug();
+        let seed = seed.clone();
+        let title = seed.name.clone();
+        self.similar = Some(Io::global(cx).load(
+            async move {
+                let (mut tracks, _) = client.track_radio(&id, None).await?;
+                tracks.retain(|track| {
+                    track.playable && track.id.as_ref().is_some_and(|other| other != &id)
+                });
+                tracks.truncate(24);
+                let duration = seed.duration.as_secs();
+                tracks.sort_by_cached_key(|track| {
+                    let artist = u64::from(track.artists != seed.artists) * 10;
+                    let length = track.duration.as_secs();
+                    artist
+                        + if length == 0 || duration == 0 {
+                            3
+                        } else {
+                            length.abs_diff(duration) / 30
+                        }
+                });
+                anyhow::Ok(tracks)
+            },
+            move |this, result, cx| {
+                this.similar = None;
+                if this.session.read(cx).provider_slug() != provider {
+                    return;
+                }
+                if let Ok(mut tracks) = result {
+                    let mut seen = this.queue.read(cx).ids();
+                    tracks.retain(|track| {
+                        track.id.as_ref().is_some_and(|id| seen.insert(id.clone()))
+                    });
+                    tracks.truncate(10);
+                    if !tracks.is_empty() {
+                        this.enqueue_tracks(tracks, None, QueuePlacement::Next, cx);
+                        return;
+                    }
+                }
+                Toasts::about(Outcome::Failed, "toast-radio-failed", title, cx);
+            },
+            cx,
+        ));
     }
 
     /// Plays `seed` now and fills the queue behind it with its radio once that arrives.

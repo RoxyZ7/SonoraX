@@ -450,7 +450,7 @@ home-favorite-albums = อัลบั้มโปรด
 home-artists = ศิลปิน
 home-collection-albums = อัลบั้มจากคอลเลกชันของคุณ
 # search page
-search-placeholder = คุณอยากฟังอะไร?
+search-placeholder = ค้นเพลง หรือพิมพ์ อารมณ์: เพลงฟังตอนฝนตก
 search-browse = เรียกดูทั้งหมด
 search-submit = ค้นหา
 search-recent = การค้นหาล่าสุด
@@ -1257,7 +1257,8 @@ toast-unpinned = เลิกปักหมุด { $name } แล้ว
 # lyrics
 lyrics-title = เนื้อเพลง
 lyrics-untimed = เนื้อเพลงไม่ซิงก์
-lyrics-auto-working = กำลังซิงก์เนื้อเพลง…
+lyrics-auto-working = กำลังจับเวลาเนื้อเพลงบนเครื่อง…
+lyrics-auto-unavailable = จับเวลาเนื้อเพลงอัตโนมัติไม่ได้
 lyrics-auto-credit = ซิงก์เนื้อเพลงบนเครื่อง
 lyrics-file-add = เพิ่ม .lrc
 lyrics-file-replace = เปลี่ยน .lrc
@@ -1453,3 +1454,16 @@ response-graph-readout =
         [down] -{ $gain }
        *[flat] { $gain }
     } dB
+
+dev-lyrics-next = Lyrics Doctor · ลองเนื้อเพลงจากแหล่งอื่น
+lyrics-offset-earlier = เลื่อนเนื้อเพลงให้เร็วขึ้น 250 ms
+lyrics-offset-later = เลื่อนเนื้อเพลงให้ช้าลง 250 ms
+lyrics-offset-reset = รีเซ็ตเวลาเนื้อเพลง ({ $offset } ms)
+lyrics-offset-save-failed = บันทึกเวลาเนื้อเพลงไม่สำเร็จ
+dev-lyrics-paste = วางข้อความเป็นเนื้อเพลงฉบับส่วนตัว
+dev-queue-similar = เพิ่มเพลงที่เข้ากันไว้เล่นถัดไป
+dev-find-versions = ค้นเพลงนี้ในบริการอื่น
+dev-history-timeline = ไทม์ไลน์การฟัง · เลือกเดือนเพื่อเพิ่มเพลงลงคิว
+dev-history-month = { $month } · { $count } เพลง
+dev-lyrics-copy = คัดลอกเนื้อเพลงเพื่อแก้ไข
+dev-updates-disabled = Dev build ไม่ตรวจอัปเดต

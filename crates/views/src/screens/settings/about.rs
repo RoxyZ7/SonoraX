@@ -63,11 +63,13 @@ const MEMBERS: [Member; 5] = [
 
 impl SettingsView {
     pub(super) fn about_groups(&self) -> Vec<Group> {
-        vec![
-            Group::untitled().rows(
-                [Slot::Version, Slot::Updates, Slot::Log, Slot::License, Slot::Source],
-            ),
-        ]
+        vec![Group::untitled().rows([
+            Slot::Version,
+            Slot::Updates,
+            Slot::Log,
+            Slot::License,
+            Slot::Source,
+        ])]
     }
 
     pub(super) fn version_row(&self) -> AnyElement {
@@ -78,10 +80,19 @@ impl SettingsView {
     }
 
     pub(super) fn updates_row(&self, _cx: &mut Context<Self>) -> AnyElement {
+        if state::VERSION.ends_with("-dev") {
+            return self.row(
+                t!("settings-check-updates"),
+                ui::spoken("dev-updates-disabled", t!("dev-updates-disabled")).into_any_element(),
+            );
+        }
         Row::new(
             t!("settings-check-updates"),
-            ui::spoken("settings-auto-updates-enabled", t!("settings-auto-updates-enabled"))
-                .into_any_element(),
+            ui::spoken(
+                "settings-auto-updates-enabled",
+                t!("settings-auto-updates-enabled"),
+            )
+            .into_any_element(),
         )
         .detail(t!("settings-check-updates-detail"))
         .into_any_element()

@@ -47,7 +47,7 @@ impl Cache {
     pub fn standard() -> Self {
         let dir = dirs::cache_dir()
             .unwrap_or_else(std::env::temp_dir)
-            .join("SonoraX");
+            .join(crate::profile_folder("SonoraX"));
         Self::at(dir.join("cache.sqlite"))
     }
 

@@ -967,8 +967,7 @@ impl Aside {
     fn verses(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         let playback = self.playback.read(cx);
-        let duration = playback.shown_time(cx).1;
-        let (position, singing) = match playback.steered(cx) {
+        let (playhead, singing) = match playback.steered(cx) {
             Some(remote) => (remote.state.live_position(), remote.state.playing),
             None => (
                 playback.live_position(),
@@ -976,8 +975,15 @@ impl Aside {
             ),
         };
         let lyrics = self.lyrics.read(cx);
+        let duration = lyrics
+            .lyric_time(playback.shown_time(cx).1)
+            .unwrap_or_default();
+        let lyric_time = lyrics.lyric_time(playhead);
+        let position = lyric_time.unwrap_or_default();
+        let singing = singing && lyric_time.is_some();
         let state = lyrics.state().clone();
         let generating = lyrics.generating();
+        let auto_failed = lyrics.auto_failed();
         let shown = lyrics.current().is_some();
         let mirrored = lyrics
             .current()
@@ -1065,7 +1071,7 @@ impl Aside {
 
         // aim before reading
         if let Some(lines) = &lines {
-            let live = active_lyrics_row(lines, position);
+            let live = lyric_time.and_then(|time| active_lyrics_row(lines, time));
             let focus = match self.pinning {
                 Some(row) if Some(row) != live => Some(row),
                 _ => {
@@ -1120,7 +1126,7 @@ impl Aside {
         let mut drifting = false;
         let mut body: Vec<gpui::AnyElement> = match (&lines, &state) {
             (Some(lines), _) => {
-                let active_line = sung_line(lines, position);
+                let active_line = lyric_time.and_then(|time| sung_line(lines, time));
                 let line_sweep = active_line.and_then(|index| {
                     let line = &lines[index];
                     if self.titled || !animations || !karaoke_effects || line.worded() {
@@ -1162,7 +1168,8 @@ impl Aside {
                 if self.departing_line.is_some() && self.departed.elapsed() >= Motion::Base.span() {
                     self.departing_line = None;
                 }
-                let instrumental_line = active_instrumental(lines, position);
+                let instrumental_line =
+                    lyric_time.and_then(|time| active_instrumental(lines, time));
                 let hazing = effects() && self.settings.read(cx).blur_lyrics() && self.pinned;
                 let blur = verse * BLUR;
                 let sharpen = self.sharpen_progress(window);
@@ -1481,7 +1488,9 @@ impl Aside {
                         true => haze(viewport_haze(&scroll, row, view, blur, translation)),
                         false => 0.,
                     };
-                    let row_blur = match background_line_singing(line, active, position) {
+                    let row_blur = match lyric_time
+                        .is_some_and(|time| background_line_singing(line, active, time))
+                    {
                         true => BACKGROUND_SINGING_BLUR,
                         false => blur,
                     };
@@ -1581,6 +1590,8 @@ impl Aside {
                                 "lyrics-untimed",
                                 if generating {
                                     t!("lyrics-auto-working")
+                                } else if auto_failed {
+                                    t!("lyrics-auto-unavailable")
                                 } else {
                                     t!("lyrics-untimed")
                                 },
@@ -1780,11 +1791,12 @@ impl Aside {
     /// verse being sung is still the old one, which is where the panel would
     /// otherwise fly off to.
     fn seek_verse(&mut self, row: usize, position: std::time::Duration, cx: &mut Context<Self>) {
+        let position = self.lyrics.read(cx).playback_time(position);
+        let duration = self.playback.read(cx).shown_time(cx).1;
+        if !duration.is_zero() && position >= duration {
+            return;
+        }
         self.pinning = Some(row);
-        self.seek_lyrics(position, cx);
-    }
-
-    fn seek_lyrics(&mut self, position: std::time::Duration, cx: &mut Context<Self>) {
         self.anchor_verse();
         self.playback
             .update(cx, |playback, cx| playback.seek(position, cx));
