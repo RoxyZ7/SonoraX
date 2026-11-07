@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.48.6] - 2026-11-07
+
+### Added
+
+- Adjust synced lyrics in 250 ms steps and remember the timing for each song.
+- Try alternate lyrics sources and save personal lyrics from the clipboard.
+- Search for music by mood or Thai keywords, find a song on another service, and queue similar songs.
+- Revisit songs from a month in your listening history and add them to the queue.
+- Let the ambient theme respond to music as it plays.
+
+### Fixed
+
+- Improve Thai lyrics formatting and automatic timing.
+- Keep the app open when opening the font picker on Windows.
+- Detect new Nightly builds on the Nightly update channel.
+- Include Flatpak bundles for Linux x86-64 and ARM64 in stable releases.
+
 ## [0.48.5] - 2026-11-07
 
 ### Fixed
