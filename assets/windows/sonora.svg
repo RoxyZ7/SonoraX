@@ -1,8 +1,36 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="12" ry="12" fill="white"/>
-  <path d="M13.3333 27.3333V36.6667" stroke="black" stroke-width="2" stroke-linecap="round"/>
-  <path d="M22.6667 20.3333V43.6667" stroke="black" stroke-width="2" stroke-linecap="round"/>
-  <path d="M32.0 13.3333V50.6667" stroke="black" stroke-width="2" stroke-linecap="round"/>
-  <path d="M41.3333 20.3333V43.6667" stroke="black" stroke-width="2" stroke-linecap="round"/>
-  <path d="M50.6667 27.3333V36.6667" stroke="black" stroke-width="2" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00b3ff"/>
+      <stop offset="1" stop-color="#1a1a1a"/>
+    </linearGradient>
+    <linearGradient id="x-gloss" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0.5" stop-color="#e3e3e3"/>
+      <stop offset="0.35" stop-color="#a3ffff"/>
+      <stop offset="0.1" stop-color="#57fcff"/>
+      <stop offset="0.7" stop-color="#00aaff"/>
+    </linearGradient>
+    <filter id="x-glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feFlood flood-color="#94fdff" flood-opacity="0.9" result="glow-color"/>
+      <feComposite in="glow-color" in2="blur" operator="in" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <path id="x-shape" d="M 60,30 L 100,30 L 146.67,110 L 200,30 L 260,30 L 174.67,158 L 240,270 L 200,270 L 153.33,190 L 100,270 L 40,270 L 125.33,142 Z"/>
+  </defs>
+  <path d="M40.9600 0 c8.0648 0 12.0971 0 15.1775 1.5695 a14.4000 14.4000 0 0 1 6.2930 6.2930 c1.5695 3.0803 1.5695 7.1127 1.5695 15.1775 L64.0000 40.9600 c0 8.0648 0 12.0971 -1.5695 15.1775 a14.4000 14.4000 0 0 1 -6.2930 6.2930 c-3.0803 1.5695 -7.1127 1.5695 -15.1775 1.5695 L23.0400 64.0000 c-8.0648 0 -12.0971 0 -15.1775 -1.5695 a14.4000 14.4000 0 0 1 -6.2930 -6.2930 c-1.5695 -3.0803 -1.5695 -7.1127 -1.5695 -15.1775 L0 23.0400 c0 -8.0648 0 -12.0971 1.5695 -15.1775 a14.4000 14.4000 0 0 1 6.2930 -6.2930 c3.0803 -1.5695 7.1127 -1.5695 15.1775 -1.5695 Z" fill="url(#background)"/>
+  <path d="M13.3333 27.3333V36.6667" stroke="#d6d6d6" stroke-width="3" stroke-linecap="round"/>
+  <path d="M22.6667 20.3333V43.6667" stroke="#d6d6d6" stroke-width="3" stroke-linecap="round"/>
+  <path d="M32 13.3333V50.6667" stroke="#d6d6d6" stroke-width="3" stroke-linecap="round"/>
+  <path d="M41.3333 20.3333V43.6667" stroke="#d6d6d6" stroke-width="3" stroke-linecap="round"/>
+  <path d="M50.6667 27.3333V36.6667" stroke="#d6d6d6" stroke-width="3" stroke-linecap="round"/>
+  <g transform="translate(45, 6) scale(0.030)">
+    <g transform="translate(70, 50) skewX(-12)" filter="url(#x-glow)">
+      <use href="#x-shape" fill="url(#x-gloss)" stroke="#8ec7c7" stroke-width="18" stroke-linejoin="round"/>
+      <use href="#x-shape" fill="none" stroke="#ffffff" stroke-opacity="0.50" stroke-width="5" stroke-linejoin="round"/>
+    </g>
+  </g>
 </svg>

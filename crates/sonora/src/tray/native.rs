@@ -9,10 +9,7 @@ use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIc
 use super::{Art, Event, Shown};
 
 const TOOLTIP: &str = "SonoraX";
-const PNG: &[u8] = match cfg!(target_os = "macos") {
-    true => include_bytes!("../../../../assets/tray/template-64.png"),
-    false => include_bytes!("../../../../assets/tray/sonora.png"),
-};
+const PNG: &[u8] = include_bytes!("../../../../assets/tray/sonora.png");
 const MENU_ON_CLICK: bool = cfg!(target_os = "macos");
 
 /// The tray icon and its menu. The status item is built the first time it goes into the tray, so

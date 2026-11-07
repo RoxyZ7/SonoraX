@@ -1298,6 +1298,7 @@ requirement-web-engine = ติดตั้ง webkit2gtk-4.1 เพื่อล
 requirement-help = สิ่งที่ต้องติดตั้ง
 settings-check-updates = อัปเดตอัตโนมัติ
 settings-check-updates-detail = SonoraX จะติดตั้งเวอร์ชันใหม่โดยอัตโนมัติเมื่อเปิดโปรแกรม หากมีอัปเดตระหว่างที่กำลังใช้งาน จะแจ้งให้ทราบ
+settings-auto-updates-enabled = เปิด
 settings-update-channel = ช่องทางการเผยแพร่
 settings-update-channel-detail = เสถียรติดตามการเปิดตัว Nightly ดำเนินรอยตามโครงสร้างหลักที่สร้างขึ้นทุกคืน ซึ่งจะได้รับการเปลี่ยนแปลงก่อนและมีการทดสอบน้อยกว่า
 update-channel-stable = มีเสถียรภาพ
