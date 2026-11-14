@@ -268,12 +268,12 @@ impl LyricTimeline {
 
     /// Retain one outgoing scene even when the user skips through several tracks quickly.
     fn follow_song(&mut self, art: Option<SongArt>, now: Instant, motion: bool) {
-        if !motion || art.is_none() {
-            self.exit = None;
-        } else if self
-            .exit
-            .as_ref()
-            .is_some_and(|exit| now - exit.started >= SONG_DISSOLVE)
+        if !motion
+            || art.is_none()
+            || self
+                .exit
+                .as_ref()
+                .is_some_and(|exit| now - exit.started >= SONG_DISSOLVE)
         {
             self.exit = None;
         }
@@ -593,13 +593,11 @@ pub(super) fn scene(
     }
     let (lyric_time, source) = scene_lyrics(track.as_ref(), playhead, cx);
     timeline.sky.update(source);
-    let incoming_lyrics = crossfade
-        .map(|(track, fade)| {
-            let (at, source) = scene_lyrics(Some(track), fade.incoming, cx);
-            timeline.incoming_sky.update(source);
-            at
-        })
-        .flatten();
+    let incoming_lyrics = crossfade.and_then(|(track, fade)| {
+        let (at, source) = scene_lyrics(Some(track), fade.incoming, cx);
+        timeline.incoming_sky.update(source);
+        at
+    });
 
     let moving = playing && motion;
     let now = jiff::Zoned::now();
@@ -928,7 +926,6 @@ pub(super) fn scene(
                     },
                     colors.clock[1],
                     rem,
-                    &dark,
                 ))
             },
         )
@@ -947,7 +944,6 @@ pub(super) fn scene(
                 },
                 colors.clock[1],
                 rem,
-                &dark,
             ))
         })
         .when_some(
@@ -969,7 +965,6 @@ pub(super) fn scene(
                     },
                     colors.clock[1],
                     rem,
-                    &dark,
                 ))
             },
         )
@@ -1174,12 +1169,12 @@ impl LyricResponse {
         .inset_0();
         div()
             .absolute()
-            .left(if row % 2 == 0 {
+            .left(if row.is_multiple_of(2) {
                 shift * 2.
             } else {
                 Pixels::ZERO
             })
-            .right(if row % 2 == 0 {
+            .right(if row.is_multiple_of(2) {
                 Pixels::ZERO
             } else {
                 shift * 2.
@@ -1389,8 +1384,8 @@ fn album_card(
     reveal: AlbumReveal,
     tint: Hsla,
     rem: Pixels,
-    dark: &Theme,
 ) -> Div {
+    let dark = Theme::dark();
     let side = album_side
         * (0.90 + reveal.focus * 0.10 + reveal.pulse * 0.045)
         * (0.93 + reveal.opacity * 0.07);
@@ -1649,7 +1644,7 @@ fn edge_sweep(nodes: &[LyricNode], active: usize, at: Duration) -> Option<EdgeSw
                 settle: at.saturating_sub(onset).as_secs_f32() / settle.as_secs_f32(),
             })
         })
-        .last()
+        .next_back()
 }
 
 /// Shares the rim's cover palette with the stars while retaining a readable core.
@@ -1696,7 +1691,7 @@ fn star_positions(
 ) -> [(f32, f32); GROUP_LIMIT] {
     let variation = ((shape as u32).wrapping_mul(0x9e37_79b9).rotate_right(13) >> 24) as f32 / 255.;
     let spread = 0.88 + variation * 0.26;
-    let direction = if shape % 2 == 0 { 1. } else { -1. };
+    let direction = if shape.is_multiple_of(2) { 1. } else { -1. };
     let entry = 0.95 + ui::ease_out_cubic((age / 0.28).clamp(0., 1.)) * 0.05;
     let footprint = entry * (0.90 + energy * 0.31);
     let sway = 0.58 + energy * 0.42;

@@ -435,8 +435,7 @@ fn align_words(
         let mut cursor = lower + relative;
         let mut byte = 0;
         let mut words = Vec::new();
-        let mut boundaries = segmenter.segment_str(&line.text);
-        while let Some(next) = boundaries.next() {
+        for next in segmenter.segment_str(&line.text) {
             let text = &line.text[byte..next];
             byte = next;
             let width = letters(text).count();
