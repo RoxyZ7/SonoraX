@@ -727,6 +727,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          draft: true
           files: dist/*
           body_path: notes.md
           prerelease: ${{ contains(github.ref_name, '-') }}
