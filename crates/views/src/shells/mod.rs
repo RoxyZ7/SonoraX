@@ -1,3 +1,4 @@
+mod constellation;
 pub(crate) mod fullscreen;
 pub(crate) mod workspace;
 

@@ -4,6 +4,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
+use icu_segmenter::{WordSegmenter, options::WordBreakInvariantOptions};
+use music::{LyricsLine, LyricsWord};
 use rusqlite::OptionalExtension as _;
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -277,6 +279,12 @@ pub(crate) fn save(db: &Database, key: &str, version: &str, lrc: &str) -> Result
 
 /// Runs the recognizer on transient audio. Its words are anchors for the supplied lyrics only.
 pub(crate) fn generate(engine: &Path, pcm: &[i16], text: &str) -> Result<Option<String>> {
+    let transcript = recognize(engine, pcm, text)?;
+    let duration_ms = (pcm.len() as u64 * 1_000 / u64::from(RATE)) as i64;
+    Ok(align(transcript, text, duration_ms))
+}
+
+fn recognize(engine: &Path, pcm: &[i16], text: &str) -> Result<Transcript> {
     let scratch = tempfile::tempdir()?;
     let input = scratch.path().join("input.wav");
     let output = scratch.path().join("timing");
@@ -337,10 +345,120 @@ pub(crate) fn generate(engine: &Path, pcm: &[i16], text: &str) -> Result<Option<
             }
         }
     }
-    let transcript: Transcript =
-        serde_json::from_reader(std::fs::File::open(output.with_extension("json"))?)?;
-    let duration_ms = (pcm.len() as u64 * 1_000 / u64::from(RATE)) as i64;
-    Ok(align(transcript, text, duration_ms))
+    Ok(serde_json::from_reader(std::fs::File::open(
+        output.with_extension("json"),
+    )?)?)
+}
+
+/// Match each line near its supplied onset, preserving the sheet and adding timing only
+/// where the recognizer can locate the written words.
+pub(crate) fn generate_words(
+    engine: &Path,
+    pcm: &[i16],
+    lines: &[LyricsLine],
+) -> Result<Option<Vec<LyricsLine>>> {
+    let text = lines
+        .iter()
+        .map(|line| line.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let transcript = recognize(engine, pcm, &text)?;
+    Ok(align_words(
+        transcript,
+        lines,
+        (pcm.len() as u64 * 1_000 / u64::from(RATE)) as i64,
+    ))
+}
+
+fn align_words(
+    transcript: Transcript,
+    lines: &[LyricsLine],
+    duration_ms: i64,
+) -> Option<Vec<LyricsLine>> {
+    let mut chars = Vec::new();
+    let mut times = Vec::new();
+    for token in transcript
+        .transcription
+        .into_iter()
+        .flat_map(|segment| segment.tokens)
+    {
+        let Some(span) = token
+            .offsets
+            .filter(|span| span.from >= 0 && span.to >= span.from && span.from < duration_ms)
+        else {
+            continue;
+        };
+        if token.text.starts_with("[_") {
+            continue;
+        }
+        let spoken: Vec<_> = letters(&token.text).collect();
+        let count = spoken.len() as i64;
+        for (index, ch) in spoken.into_iter().enumerate() {
+            let span_ms = span.to.min(duration_ms) - span.from;
+            let start = span.from + span_ms * index as i64 / count;
+            let end = span.from + span_ms * (index as i64 + 1) / count;
+            let start = start.max(times.last().map_or(0, |(at, _)| *at));
+            chars.push(ch);
+            times.push((start, end.max(start)));
+        }
+    }
+    let segmenter = WordSegmenter::new_auto(WordBreakInvariantOptions::default());
+    let mut result = lines.to_vec();
+    let mut changed = false;
+    let mut consumed = 0;
+    for (index, line) in result.iter_mut().enumerate() {
+        if line.text.trim().is_empty() || line.words.as_ref().is_some_and(|words| !words.is_empty())
+        {
+            continue;
+        }
+        let start = line.start.as_millis().min(i64::MAX as u128) as i64;
+        let end = lines
+            .get(index + 1)
+            .map(|next| next.start.as_millis() as i64)
+            .unwrap_or(duration_ms)
+            .min(start.saturating_add(12_000));
+        let lower = consumed.max(times.partition_point(|&(at, _)| at < start.saturating_sub(550)));
+        let upper = times.partition_point(|&(at, _)| at < end);
+        if upper <= lower {
+            continue;
+        }
+        let target: Vec<_> = letters(&line.text).collect();
+        if target.len() < 2 {
+            continue;
+        }
+        let Some(relative) = chars[lower..upper]
+            .windows(target.len())
+            .position(|window| window == target)
+        else {
+            continue;
+        };
+        let mut cursor = lower + relative;
+        let mut byte = 0;
+        let mut words = Vec::new();
+        let mut boundaries = segmenter.segment_str(&line.text);
+        while let Some(next) = boundaries.next() {
+            let text = &line.text[byte..next];
+            byte = next;
+            let width = letters(text).count();
+            if width == 0 {
+                continue;
+            }
+            let from = times[cursor].0.max(start);
+            let to = times[cursor + width - 1].1.min(end).max(from);
+            words.push(LyricsWord {
+                start: Duration::from_millis(from as u64),
+                end: Duration::from_millis(to as u64),
+                text: text.to_owned(),
+            });
+            cursor += width;
+        }
+        if words.len() >= 2 && words.windows(2).all(|pair| pair[0].start < pair[1].start) {
+            line.words = Some(words);
+            changed = true;
+            consumed = cursor;
+        }
+    }
+    changed.then_some(result)
 }
 
 /// Writes the recognizer's 16-bit mono WAV input.

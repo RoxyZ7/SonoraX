@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui::{AppContext as _, Context, Entity, PathPromptOptions, Task};
+use gpui::{App, AppContext as _, Context, Entity, PathPromptOptions, Task};
 use music::lyrics::LOCAL;
 use music::{LyricsHit, LyricsProvider, LyricsQuery, Track, TrackKey};
 use rusqlite::OptionalExtension as _;
@@ -47,6 +47,8 @@ pub struct Lyrics {
     offset_ms: i32,
     offset_edit: Option<Task<()>>,
     offset_revision: u64,
+    constellation_words: Option<ConstellationWords>,
+    constellation_task: Option<Task<()>>,
     attached: bool,
     edit: Option<Task<()>>,
     auto: Option<Task<()>>,
@@ -70,9 +72,29 @@ pub struct Lyrics {
     task: Option<Task<()>>,
     ahead: Option<Task<()>>,
     ahead_of: Option<String>,
+    prepared: Option<PreparedLyrics>,
     save: Option<Task<()>>,
     /// Moves the old lyrics.json into the cache database, once.
     _migration: Task<()>,
+}
+
+/// The next track's lyrics and its own timing adjustment, while the current track still plays.
+struct PreparedLyrics {
+    id: String,
+    hit: Option<LyricsHit>,
+    offset_ms: i32,
+}
+
+#[derive(Default)]
+struct SavedLyrics {
+    offset_ms: i32,
+    attachment: Option<LyricsHit>,
+}
+
+struct ConstellationWords {
+    base: Arc<[music::LyricsLine]>,
+    aligned: Option<Arc<[music::LyricsLine]>>,
+    attempted_generation: bool,
 }
 
 impl Lyrics {
@@ -106,6 +128,7 @@ impl Lyrics {
             this.task = None;
             this.ahead = None;
             this.ahead_of = None;
+            this.prepared = None;
             this.forget(cx);
             this.follow(cx);
         })
@@ -132,6 +155,8 @@ impl Lyrics {
             offset_ms: 0,
             offset_edit: None,
             offset_revision: 0,
+            constellation_words: None,
+            constellation_task: None,
             attached: false,
             edit: None,
             auto: None,
@@ -151,6 +176,7 @@ impl Lyrics {
             task: None,
             ahead: None,
             ahead_of: None,
+            prepared: None,
             save: None,
             _migration: migration,
         }
@@ -299,6 +325,47 @@ impl Lyrics {
         self.hits.get(self.chosen)
     }
 
+    /// The chosen lyrics if they belong to the track currently being drawn.
+    pub fn current_for_track(&self, id: &str) -> Option<&LyricsHit> {
+        self.current()
+            .filter(|_| self.following.as_deref() == Some(id))
+    }
+
+    /// Supplies the prepared sheet during an overlap and while the next track takes over.
+    pub fn visual_lyrics(
+        &self,
+        id: &str,
+        position: Duration,
+    ) -> (Option<&Arc<[music::LyricsLine]>>, Option<Duration>) {
+        if let Some(hit) = self.current_for_track(id) {
+            let lines = match &hit.lyrics {
+                music::Lyrics::Synced { lines } => Some(
+                    self.constellation_words
+                        .as_ref()
+                        .filter(|words| Arc::ptr_eq(&words.base, lines))
+                        .and_then(|words| words.aligned.as_ref())
+                        .unwrap_or(lines),
+                ),
+                _ => None,
+            };
+            return (lines, self.lyric_time(position));
+        }
+        if let Some(prepared) = self
+            .prepared
+            .as_ref()
+            .filter(|prepared| self.enabled && prepared.id == id)
+        {
+            return (
+                prepared.hit.as_ref().and_then(|hit| match &hit.lyrics {
+                    music::Lyrics::Synced { lines } => Some(lines),
+                    _ => None,
+                }),
+                offset_position(position, prepared.offset_ms),
+            );
+        }
+        (None, Some(position))
+    }
+
     pub fn revision(&self) -> u64 {
         self.revision
     }
@@ -313,12 +380,7 @@ impl Lyrics {
     }
 
     pub fn lyric_time(&self, position: Duration) -> Option<Duration> {
-        let offset = Duration::from_millis(u64::from(self.offset_ms.unsigned_abs()));
-        if self.offset_ms < 0 {
-            Some(position.saturating_add(offset))
-        } else {
-            position.checked_sub(offset)
-        }
+        offset_position(position, self.offset_ms)
     }
 
     pub fn playback_time(&self, position: Duration) -> Duration {
@@ -328,6 +390,105 @@ impl Lyrics {
         } else {
             position.saturating_add(offset)
         }
+    }
+
+    fn constellation_source(&self, cx: &App) -> Option<(&str, &Arc<[music::LyricsLine]>)> {
+        let id = self
+            .following
+            .as_deref()
+            .filter(|id| self.session.read(cx).slug_for(id) == Some("youtube"))?;
+        let music::Lyrics::Synced { lines } = &self.current()?.lyrics else {
+            return None;
+        };
+        lines
+            .iter()
+            .any(|line| {
+                line.words.as_ref().is_none_or(Vec::is_empty) && !line.text.trim().is_empty()
+            })
+            .then_some((id, lines))
+    }
+
+    /// Reuses saved word timings or derives them in the background while Constellation is open.
+    pub fn ensure_constellation_timing(&mut self, cx: &mut Context<Self>) {
+        if self.constellation_task.is_some() {
+            return;
+        }
+        let Some((id, base)) = self.constellation_source(cx) else {
+            return;
+        };
+        let saved = self
+            .constellation_words
+            .as_ref()
+            .filter(|saved| Arc::ptr_eq(&saved.base, base));
+        if saved.is_some_and(|saved| saved.aligned.is_some() || saved.attempted_generation) {
+            return;
+        }
+        let client = self.session.read(cx).client().filter(|_| {
+            self.settled
+                && self.auto.is_none()
+                && !crate::Network::offline(cx)
+                && lyrics_auto::supported()
+        });
+        let generate = client.is_some();
+        if saved.is_some() && !generate {
+            return;
+        }
+        let (id, base) = (id.to_owned(), base.clone());
+        let key = self.key(&id, cx);
+        let db = self.overrides.clone();
+        let player = self.playback.read(cx);
+        let quality = player.quality();
+        let vault = player.vault().clone();
+        let input = base.clone();
+        let audio_id = id.clone();
+        self.constellation_task = Some(self.io.load(
+            async move {
+                let version = format!("constellation:{}", lyrics_auto::fingerprint(&serde_json::to_string(input.as_ref())?));
+                let read_db = db.clone();
+                let read_key = key.clone();
+                let read_version = version.clone();
+                let cached = tokio::task::spawn_blocking(move || {
+                    read_db.open()?.query_row(
+                        "SELECT lyrics FROM constellation_word_timing WHERE track_key = ?1 AND fingerprint = ?2",
+                        (&read_key, &read_version),
+                        |row| row.get::<_, String>(0),
+                    ).optional().map_err(anyhow::Error::from)
+                }).await??;
+                if let Some(cached) = cached {
+                    return Ok(Some(serde_json::from_str::<Vec<music::LyricsLine>>(&cached)?.into()));
+                }
+                let Some(client) = client else { return Ok(None) };
+                let engine = lyrics_auto::ensure_engine().await?;
+                let Some(pcm) = client.lyrics_audio(&audio_id, quality, &vault).await? else { return Ok(None) };
+                tokio::task::spawn_blocking(move || {
+                    let Some(aligned) = lyrics_auto::generate_words(&engine, &pcm, &input)? else { return Ok(None) };
+                    db.open()?.execute(
+                        "INSERT INTO constellation_word_timing (track_key, fingerprint, lyrics) VALUES (?1, ?2, ?3)
+                         ON CONFLICT(track_key) DO UPDATE SET fingerprint = excluded.fingerprint, lyrics = excluded.lyrics",
+                        (&key, &version, serde_json::to_string(&aligned)?),
+                    )?;
+                    Ok(Some(aligned.into()))
+                }).await?
+            },
+            move |this, result: anyhow::Result<Option<Arc<[music::LyricsLine]>>>, cx| {
+                this.constellation_task = None;
+                let current = this.constellation_source(cx).is_some_and(|(current, lines)| current == id && Arc::ptr_eq(lines, &base));
+                if current {
+                    if let Err(error) = &result {
+                        log::warn!("lyrics: constellation alignment failed: {error:#}");
+                    }
+                    this.constellation_words = Some(ConstellationWords {
+                        base,
+                        aligned: result.unwrap_or_default(),
+                        attempted_generation: generate,
+                    });
+                }
+                cx.notify();
+                this.maybe_auto(cx);
+            },
+            cx,
+        ));
+        cx.notify();
     }
 
     pub fn set_offset(&mut self, offset_ms: i32, cx: &mut Context<Self>) {
@@ -431,6 +592,7 @@ impl Lyrics {
         let (track, id) = (track.clone(), id.to_owned());
         self.following = Some(id.clone());
         self.offset_ms = 0;
+        self.constellation_words = None;
         self.auto_checked = false;
         self.auto_failed = false;
         self.chosen = 0;
@@ -449,54 +611,23 @@ impl Lyrics {
         let offset_revision = self.offset_revision;
         self.task = Some(cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move {
-                    let connection = db.open()?;
-                    let offset = connection
-                        .query_row(
-                            "SELECT offset_ms FROM lyrics_offsets WHERE track_key = ?1",
-                            [&key],
-                            |row| row.get::<_, i32>(0),
-                        )
-                        .optional()?
-                        .unwrap_or_default()
-                        .clamp(-MAX_OFFSET_MS, MAX_OFFSET_MS);
-                    let lrc: Option<String> = connection
-                        .query_row(
-                            "SELECT lrc FROM lyrics_overrides WHERE track_key = ?1",
-                            [&key],
-                            |row| row.get(0),
-                        )
-                        .optional()?;
-                    Ok::<_, anyhow::Error>((
-                        offset,
-                        lrc.as_deref()
-                            .filter(|text| !text.trim().is_empty())
-                            .map(|text| {
-                                attachment_lyrics(text)
-                                    .unwrap_or_else(|| music::Lyrics::plain(text))
-                            }),
-                    ))
-                })
+                .background_spawn(async move { saved_lyrics(&db, &key) })
                 .await;
             this.update(cx, |this, cx| {
                 if !this.finished(&id) {
                     return;
                 }
-                let result = result.map(|(offset, attachment)| {
+                let result = result.map(|saved| {
                     if this.offset_revision == offset_revision {
-                        this.offset_ms = offset;
+                        this.offset_ms = saved.offset_ms;
                     }
-                    attachment
+                    saved.attachment
                 });
                 match result {
                     Ok(Some(lyrics)) => {
                         this.attached = true;
                         this.settled = true;
-                        this.hits = vec![LyricsHit {
-                            source: "LRC",
-                            lyrics,
-                            ..LyricsHit::default()
-                        }];
+                        this.hits = vec![lyrics];
                         this.state = LyricsState::Ready;
                         cx.notify();
                     }
@@ -552,6 +683,7 @@ impl Lyrics {
     /// Fills in timings only after the regular sources have settled on plain lyrics.
     fn maybe_auto(&mut self, cx: &mut Context<Self>) {
         if self.auto.is_some()
+            || self.constellation_task.is_some()
             || self.auto_checked
             || self.picked
             || self.hits.iter().any(|hit| hit.lyrics.synced())
@@ -757,6 +889,8 @@ impl Lyrics {
         self.task = None;
         self.following = None;
         self.offset_ms = 0;
+        self.constellation_words = None;
+        self.prepared = None;
         self.hits.clear();
         self.chosen = 0;
         self.picked = false;
@@ -784,14 +918,27 @@ impl Lyrics {
         if !self.enabled || self.task.is_some() {
             return;
         }
-        let queue = self.playback.read(cx).shown_queue(cx);
-        let Some(track) = queue.track(QueuePosition::Upcoming(0), cx) else {
+        let playback = self.playback.read(cx);
+        let overlap = playback.crossfade_target(cx).cloned();
+        let crossfade = overlap.is_some();
+        let Some(track) = overlap.or_else(|| {
+            playback
+                .shown_queue(cx)
+                .track(QueuePosition::Upcoming(0), cx)
+        }) else {
             return;
         };
         let Some(id) = track.id.as_deref() else {
             return;
         };
-        if self.ahead_of.as_deref() == Some(id) || self.recalls(id) {
+        if self.following.as_deref() == Some(id)
+            || self.ahead_of.as_deref() == Some(id)
+            || self
+                .prepared
+                .as_ref()
+                .is_some_and(|prepared| prepared.id == id)
+            || (!crossfade && self.recalls(id))
+        {
             return;
         }
         let id = id.to_owned();
@@ -821,7 +968,25 @@ impl Lyrics {
         let stored = remembered.is_none().then(|| self.stored(&id, cx));
         let query = self.query(&track, &id, cx);
         let io = self.io.clone();
+        let saved = (self.ahead_of.as_deref() == Some(&id)).then(|| {
+            let db = self.overrides.clone();
+            let key = self.key(&id, cx);
+            cx.background_executor()
+                .spawn(async move { saved_lyrics(&db, &key) })
+        });
         cx.spawn(async move |this, cx| {
+            let saved = match saved {
+                Some(saved) => saved.await.unwrap_or_default(),
+                None => SavedLyrics::default(),
+            };
+            if let Some(hit) = saved.attachment.clone() {
+                this.update(cx, |this, cx| {
+                    this.prepare(&id, &saved, Some(hit), cx);
+                    this.finished(&id);
+                })
+                .ok();
+                return;
+            }
             let cached = match stored {
                 Some(stored) => stored.await,
                 None => remembered,
@@ -842,6 +1007,14 @@ impl Lyrics {
                 .collect();
             if providers.is_empty() {
                 this.update(cx, |this, cx| {
+                    let held = cached
+                        .hits
+                        .iter()
+                        .filter(|hit| enabled.contains(&hit.source));
+                    let best = ordered(&query, held.cloned().collect(), &priority)
+                        .into_iter()
+                        .next();
+                    this.prepare(&id, &saved, best, cx);
                     if this.finished(&id) {
                         log::debug!("lyrics: showing the stored answer");
                         this.show(&cached, &query, cx);
@@ -885,6 +1058,7 @@ impl Lyrics {
                 let anchor = displayed.clone();
                 this.update(cx, |this, cx| {
                     if this.following.as_deref() != Some(id.as_str()) {
+                        this.prepare(&id, &saved, anchor, cx);
                         return;
                     }
                     this.paint(ranked, anchor.as_ref(), waiting, cx);
@@ -895,6 +1069,7 @@ impl Lyrics {
             let answered = join(worker).await;
 
             this.update(cx, |this, cx| {
+                this.prepare(&id, &saved, displayed, cx);
                 let current = this.finished(&id);
                 match answered {
                     Ok(answered) => {
@@ -918,6 +1093,23 @@ impl Lyrics {
             })
             .ok();
         })
+    }
+
+    fn prepare(
+        &mut self,
+        id: &str,
+        saved: &SavedLyrics,
+        hit: Option<LyricsHit>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.ahead_of.as_deref() == Some(id) {
+            self.prepared = Some(PreparedLyrics {
+                id: id.to_owned(),
+                hit,
+                offset_ms: saved.offset_ms,
+            });
+            cx.notify();
+        }
     }
 
     /// Shows an answer that arrived while others are still being looked for.
@@ -1124,6 +1316,47 @@ fn ordered(query: &LyricsQuery, hits: Vec<LyricsHit>, priority: &[String]) -> Ve
 /// Hits sent to a lookup, with the provider that has now answered. Hits held from an earlier
 /// lookup come with no provider.
 type Reply = (Option<&'static str>, Vec<LyricsHit>);
+
+fn offset_position(position: Duration, offset_ms: i32) -> Option<Duration> {
+    let offset = Duration::from_millis(u64::from(offset_ms.unsigned_abs()));
+    if offset_ms < 0 {
+        Some(position.saturating_add(offset))
+    } else {
+        position.checked_sub(offset)
+    }
+}
+
+fn saved_lyrics(db: &storage::Database, key: &str) -> anyhow::Result<SavedLyrics> {
+    let connection = db.open()?;
+    let offset = connection
+        .query_row(
+            "SELECT offset_ms FROM lyrics_offsets WHERE track_key = ?1",
+            [key],
+            |row| row.get::<_, i32>(0),
+        )
+        .optional()?
+        .unwrap_or_default()
+        .clamp(-MAX_OFFSET_MS, MAX_OFFSET_MS);
+    let lrc: Option<String> = connection
+        .query_row(
+            "SELECT lrc FROM lyrics_overrides WHERE track_key = ?1",
+            [key],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let attachment = lrc
+        .as_deref()
+        .filter(|text| !text.trim().is_empty())
+        .map(|text| LyricsHit {
+            source: "LRC",
+            lyrics: attachment_lyrics(text).unwrap_or_else(|| music::Lyrics::plain(text)),
+            ..LyricsHit::default()
+        });
+    Ok(SavedLyrics {
+        offset_ms: offset,
+        attachment,
+    })
+}
 
 /// What the services have said about one track: every hit matched to it, unranked and from every
 /// source, and the services that replied. The selection is applied when it is shown.

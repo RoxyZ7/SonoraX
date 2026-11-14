@@ -155,4 +155,4 @@ pub use vacancy::Vacancy;
 pub use veil::{VeilEdge, effects, veil};
 pub use view::Mode;
 pub use visualizer::{Levels, Visualizer, VisualizerStyle};
-pub use waves::Waves;
+pub use waves::{Waves, constellation_light};

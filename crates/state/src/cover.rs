@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gpui::{Context, Entity, Task};
-use music::{CoverSize, MusicApi};
+use gpui::{App, Context, Entity, Task};
+use music::{CoverSize, MusicApi, Track};
 
 use crate::{Io, Playback, Session, SessionEvent, join};
 
@@ -72,6 +72,25 @@ impl Cover {
         self.full
             .as_deref()
             .filter(|_| self.album.as_deref() == Some(album))
+    }
+
+    /// Resolves artwork for both tracks in an overlap without waiting for the album to change.
+    pub fn backdrop_for(&self, track: &Track, cx: &App) -> Option<String> {
+        let thumbnail = track.cover.as_deref();
+        let Some(album) = track.album_id.as_deref() else {
+            return track.cover.clone();
+        };
+        let cached = self.cache.get(album);
+        let large = self
+            .full_for(album)
+            .or_else(|| self.large_for(album))
+            .or_else(|| cached.map(|art| art.full.as_deref().unwrap_or(&art.large)));
+        if let Some(large) = large {
+            return Some(large.to_owned());
+        }
+        self.client(album, cx)
+            .and_then(|client| client.cover_at(thumbnail?, CoverSize::Full))
+            .or_else(|| track.cover.clone())
     }
 
     fn forget(&mut self, cx: &mut Context<Self>) {
@@ -159,7 +178,7 @@ impl Cover {
 
     /// The client that serves album `id`: the local library for a local id, the signed-in
     /// provider otherwise.
-    fn client(&self, id: &str, cx: &Context<Self>) -> Option<Arc<dyn MusicApi>> {
+    fn client(&self, id: &str, cx: &App) -> Option<Arc<dyn MusicApi>> {
         let session = self.session.read(cx);
         match music::is_local_id(id) {
             true => session.local_client(),

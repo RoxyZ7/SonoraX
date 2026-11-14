@@ -91,5 +91,6 @@ modules:
       - install -Dm644 COPYING /app/share/licenses/io.github.roxyz7.SonoraX/LICENSE
       - install -Dm644 THIRD-PARTY.md /app/share/licenses/io.github.roxyz7.SonoraX/THIRD-PARTY.md
       - install -Dm644 assets/fonts/LICENSE.txt /app/share/licenses/io.github.roxyz7.SonoraX/LICENSE.Inter
+      - install -m644 assets/fonts/OFL-NotoSans*.txt /app/share/licenses/io.github.roxyz7.SonoraX/
       - install -Dm644 assets/icons/LICENSE /app/share/licenses/io.github.roxyz7.SonoraX/icons/LICENSE
       - for licence in assets/icons/*/LICENSE; do install -Dm644 "$licence" "/app/share/licenses/io.github.roxyz7.SonoraX/icons/LICENSE.$(basename "$(dirname "$licence")")"; done

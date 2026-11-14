@@ -233,6 +233,7 @@
               install -Dm444 "$src/THIRD-PARTY.md" "$LICENSE_DIR/THIRD-PARTY.md"
               install -Dm444 "$src/assets/fonts/LICENSE.txt" \
                 "$LICENSE_DIR/sonora/LICENSE.Inter"
+              install -m444 "$src/assets/fonts"/OFL-NotoSans*.txt "$LICENSE_DIR/sonora/"
               for licence in "$src/assets/icons"/*/LICENSE; do
                 pack="$(basename "$(dirname "$licence")")"
                 install -Dm444 "$licence" \

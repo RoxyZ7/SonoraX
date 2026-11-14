@@ -3126,7 +3126,10 @@ fn active_lyrics_row(lines: &[music::LyricsLine], position: std::time::Duration)
     line_row(lines, index).checked_sub(1)
 }
 
-fn sung_line(lines: &[music::LyricsLine], position: std::time::Duration) -> Option<usize> {
+pub(crate) fn sung_line(
+    lines: &[music::LyricsLine],
+    position: std::time::Duration,
+) -> Option<usize> {
     match active_instrumental(lines, position) {
         Some(_) => None,
         None => music::lyrics::active(lines, position),

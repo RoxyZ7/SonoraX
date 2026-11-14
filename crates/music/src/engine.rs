@@ -33,8 +33,8 @@ use crate::sink::{Cue, Paced, packet, watch_for_output};
 use crate::spectrum::Spectrum;
 use crate::vault::Shelf;
 use crate::{
-    Encoding, Fraction, Normalisation, PlaybackConfig, PlaybackEvent, PlaybackEvents, Player,
-    TrackSignal,
+    CrossfadePosition, Encoding, Fraction, Normalisation, PlaybackConfig, PlaybackEvent,
+    PlaybackEvents, Player, TrackSignal,
 };
 
 /// How often a download reports how far it has got.
@@ -172,12 +172,23 @@ pub fn start<F: Fetch>(
     let (events, event_rx) = unbounded_channel();
     let spectrum = Spectrum::new();
     let engine_spectrum = spectrum.clone();
+    let timing = AudioTiming::default();
+    let engine_timing = timing.clone();
     let name = fetch.name();
     let shelf = fetch.shelf().cloned();
     let offline = fetch.plays_offline();
     let spawned = std::thread::Builder::new()
         .name(format!("{name}-playback"))
-        .spawn(move || run(Arc::new(fetch), config, command_rx, events, engine_spectrum));
+        .spawn(move || {
+            run(
+                Arc::new(fetch),
+                config,
+                command_rx,
+                events,
+                engine_spectrum,
+                engine_timing,
+            );
+        });
     if let Err(error) = spawned {
         log::error!("playback: cannot spawn the {name} engine thread: {error}");
     }
@@ -185,6 +196,7 @@ pub fn start<F: Fetch>(
         Box::new(Handle {
             commands,
             spectrum,
+            timing,
             shelf,
             offline,
         }),
@@ -243,6 +255,7 @@ enum Job<F: Fetch> {
 struct Handle {
     commands: UnboundedSender<Command>,
     spectrum: Spectrum,
+    timing: AudioTiming,
     /// Where the provider keeps tracks, which says what is downloaded without asking the
     /// engine thread.
     shelf: Option<Shelf>,
@@ -288,6 +301,14 @@ impl Player for Handle {
 
     fn set_crossfade(&self, seconds: u8) {
         self.commands.send(Command::Crossfade(seconds)).ok();
+    }
+
+    fn crossfade_position(&self, outgoing: &str, incoming: &str) -> Option<CrossfadePosition> {
+        self.timing.overlap.position(outgoing, incoming)
+    }
+
+    fn output_position(&self, id: &str) -> Option<Duration> {
+        self.timing.heard.at(id)
     }
 
     fn play(&self) {
@@ -391,6 +412,7 @@ fn run<F: Fetch>(
     commands: UnboundedReceiver<Command>,
     events: UnboundedSender<PlaybackEvent>,
     spectrum: Spectrum,
+    timing: AudioTiming,
 ) {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -402,7 +424,9 @@ fn run<F: Fetch>(
             return;
         }
     };
-    runtime.block_on(engine_loop(fetch, config, commands, events, spectrum));
+    runtime.block_on(engine_loop(
+        fetch, config, commands, events, spectrum, timing,
+    ));
     runtime.shutdown_background();
 }
 
@@ -412,10 +436,11 @@ async fn engine_loop<F: Fetch>(
     mut commands: UnboundedReceiver<Command>,
     events: UnboundedSender<PlaybackEvent>,
     spectrum: Spectrum,
+    timing: AudioTiming,
 ) {
     let (cue, mut written) = Cue::new();
     let (changed, mut gone) = unbounded_channel();
-    let heard = Heard::default();
+    let heard = timing.heard;
     let heard_audio = heard.clone();
     let chain = Chain {
         volume: Volume::new(config.gain),
@@ -446,6 +471,7 @@ async fn engine_loop<F: Fetch>(
                 interval,
                 normalisation,
                 heard_audio,
+                timing.overlap,
             )
         });
     if let Err(error) = spawned {
@@ -1013,13 +1039,15 @@ impl<F: Fetch> Playing<F> {
 
     /// Where this track's sound is read from, given `rate`, the device's, which is what the queue
     /// counts samples at.
-    fn mark(&self, rate: u32) -> Mark {
+    fn mark(&self, rate: u32, cue: &Cue) -> Mark {
         Mark {
             id: self.id.clone(),
             channels: self.channels,
             rate,
             base: self.base,
             offset: self.offset,
+            cue: cue.clone(),
+            generation: cue.generation(),
         }
     }
 
@@ -1108,6 +1136,47 @@ impl<F: Fetch> Fade<F> {
     }
 }
 
+/// The start and length of a queued mix, measured in samples at the output's rate.
+struct MixSpan {
+    cue: Cue,
+    generation: u32,
+    outgoing: String,
+    incoming: String,
+    start_frame: u64,
+    channels: u16,
+    rate: u32,
+    duration: Duration,
+    base: Duration,
+}
+
+/// Lets the UI read the same sample counter as the transport while the decoder runs ahead.
+#[derive(Clone, Default)]
+struct Overlap(Arc<Mutex<Option<MixSpan>>>);
+
+impl Overlap {
+    fn set(&self, span: Option<MixSpan>) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = span;
+    }
+
+    fn position(&self, outgoing: &str, incoming: &str) -> Option<CrossfadePosition> {
+        let span = self.0.lock().ok()?;
+        let span = span.as_ref()?;
+        if span.outgoing != outgoing
+            || span.incoming != incoming
+            || span.cue.generation() != span.generation
+        {
+            return None;
+        }
+        let played = span.cue.played() / u64::from(span.channels);
+        let frames = played.checked_sub(span.start_frame)?;
+        let elapsed = Duration::from_secs_f64(frames as f64 / f64::from(span.rate));
+        Some(CrossfadePosition {
+            incoming: span.base + elapsed,
+            progress: (elapsed.as_secs_f32() / span.duration.as_secs_f32()).min(1.),
+        })
+    }
+}
+
 /// The track being heard, which is not always the one being decoded: at the end of a track the
 /// decoder has moved on, or stopped, while the queue still holds the last seconds of it.
 #[derive(Clone)]
@@ -1117,6 +1186,8 @@ struct Mark {
     rate: u32,
     base: Duration,
     offset: u64,
+    cue: Cue,
+    generation: u32,
 }
 
 impl Mark {
@@ -1150,6 +1221,24 @@ impl Heard {
         let mark = self.get()?;
         Some((mark.id.clone(), mark.at(cue)))
     }
+
+    fn at(&self, id: &str) -> Option<Duration> {
+        let held = self.0.lock().ok()?;
+        let mark = held.as_ref()?;
+        let cue = &mark.cue;
+        if mark.id != id || cue.cleared() || mark.generation != cue.generation() {
+            return None;
+        }
+        let position = mark.at(cue);
+        (mark.generation == cue.generation()).then_some(position)
+    }
+}
+
+/// The two output clocks read by the interface without advancing the transport.
+#[derive(Clone, Default)]
+struct AudioTiming {
+    heard: Heard,
+    overlap: Overlap,
 }
 
 /// A track whose last sample is queued but not yet heard. The events for the join wait for it,
@@ -1176,6 +1265,7 @@ fn audio_loop<F: Fetch>(
     interval: Duration,
     normalise: bool,
     heard: Heard,
+    overlap: Overlap,
 ) {
     let mut paced = match Paced::open(cue.clone(), chain, changed.clone()) {
         Ok(paced) => paced,
@@ -1228,7 +1318,7 @@ fn audio_loop<F: Fetch>(
                 })
                 .ok();
             events.send(PlaybackEvent::Ended { id: Some(ended) }).ok();
-            let mark = current.as_ref().map(|held| held.mark(paced.rate()));
+            let mark = current.as_ref().map(|held| held.mark(paced.rate(), &cue));
             let position = mark.as_ref().map_or(Duration::ZERO, |mark| mark.at(&cue));
             heard.set(mark);
             match next {
@@ -1271,12 +1361,13 @@ fn audio_loop<F: Fetch>(
                     at,
                     playing: start,
                 } => {
+                    overlap.set(None);
                     queued = None;
                     fade = None;
                     joining = None;
                     written = 0;
                     current = Playing::open(fetch.as_ref(), &id, loaded, at, 0, normalise, &events);
-                    heard.set(current.as_ref().map(|held| held.mark(paced.rate())));
+                    heard.set(current.as_ref().map(|held| held.mark(paced.rate(), &cue)));
                     if let Some(held) = &current {
                         paced.follow_rate(held.rate);
                     }
@@ -1301,6 +1392,7 @@ fn audio_loop<F: Fetch>(
                         .as_ref()
                         .is_some_and(|fade| fade.incoming.id != next.id)
                     {
+                        overlap.set(None);
                         fade = None;
                     }
                     if current.as_ref().is_none_or(|held| held.id != next.id) {
@@ -1310,8 +1402,10 @@ fn audio_loop<F: Fetch>(
                 Job::ClearSegue => {
                     queued = None;
                     fade = None;
+                    overlap.set(None);
                 }
                 Job::Stop => {
+                    overlap.set(None);
                     current = None;
                     queued = None;
                     fade = None;
@@ -1379,7 +1473,7 @@ fn audio_loop<F: Fetch>(
                         continue;
                     }
                     written = 0;
-                    heard.set(current.as_ref().map(|held| held.mark(paced.rate())));
+                    heard.set(current.as_ref().map(|held| held.mark(paced.rate(), &cue)));
                     cue.arm();
                 }
                 Job::Seek(position) => {
@@ -1424,7 +1518,7 @@ fn audio_loop<F: Fetch>(
                     }
                     joining = None;
                     written = 0;
-                    heard.set(current.as_ref().map(|held| held.mark(paced.rate())));
+                    heard.set(current.as_ref().map(|held| held.mark(paced.rate(), &cue)));
                     cue.arm();
                 }
                 Job::Gain(level) => paced.set_volume(level),
@@ -1508,6 +1602,20 @@ fn audio_loop<F: Fetch>(
             && let Some((mut starting, skip)) =
                 queued.as_mut().and_then(|next| next.begin(held, frames))
         {
+            let rate = paced.rate();
+            let start_frame = (written + paced.held_back() as u64) / u64::from(held.channels)
+                + (skip as u64 * u64::from(rate)).div_ceil(u64::from(held.rate));
+            overlap.set(Some(MixSpan {
+                cue: cue.clone(),
+                generation: cue.generation(),
+                outgoing: held.id.clone(),
+                incoming: starting.incoming.id.clone(),
+                start_frame,
+                channels: held.channels,
+                rate,
+                duration: Duration::from_secs_f64(starting.frames as f64 / f64::from(held.rate)),
+                base: starting.incoming.base,
+            }));
             starting.mix(&mut samples, skip);
             fade = Some(starting);
         }
@@ -1640,14 +1748,16 @@ mod tests {
     /// Where the sound is, counted from what the output has played rather than from a clock.
     #[test]
     fn a_mark_reads_the_position_from_the_samples_heard() {
+        let (cue, _written) = Cue::new();
         let mark = Mark {
             id: "one".to_owned(),
             channels: 2,
             rate: 44_100,
             base: Duration::from_secs(10),
             offset: 0,
+            cue: cue.clone(),
+            generation: cue.generation(),
         };
-        let (cue, _written) = Cue::new();
         cue.arm();
         assert_eq!(mark.at(&cue), Duration::from_secs(10));
     }

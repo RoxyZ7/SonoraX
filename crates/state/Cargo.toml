@@ -19,6 +19,7 @@ fastrand.workspace = true
 futures.workspace = true
 gpui.workspace = true
 i18n.workspace = true
+icu_segmenter.workspace = true
 icons.workspace = true
 image.workspace = true
 log.workspace = true

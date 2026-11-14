@@ -94,6 +94,9 @@ pub struct FullscreenView {
     settings: Entity<AppSettings>,
     aside: Entity<Aside>,
     panel: Option<SideTab>,
+    constellation: bool,
+    constellation_clock: Option<Task<()>>,
+    constellation_lyrics: super::constellation::LyricTimeline,
     /// The entrance the content plays after the pill shows another tab, the same one a settings
     /// page plays. The pill itself never takes part.
     switch: Option<Entrance>,
@@ -139,6 +142,13 @@ impl FullscreenView {
         cx.observe(&playback, |_, _, cx| cx.notify()).detach();
         let cover = Sonora::global(cx).cover.clone();
         cx.observe(&cover, |_, _, cx| cx.notify()).detach();
+        let lyrics = Sonora::global(cx).lyrics.clone();
+        cx.observe(&lyrics, |this, _, cx| {
+            if this.constellation {
+                cx.notify();
+            }
+        })
+        .detach();
         let library = Sonora::global(cx).library.clone();
         cx.observe(&library, |_, _, cx| cx.notify()).detach();
         let settings = Sonora::global(cx).settings.clone();
@@ -166,6 +176,9 @@ impl FullscreenView {
             settings,
             aside,
             panel,
+            constellation: false,
+            constellation_clock: None,
+            constellation_lyrics: super::constellation::LyricTimeline::default(),
             switch: None,
             seek: ScrubberState::new("fullscreen-seek"),
             pending: None,
@@ -210,6 +223,13 @@ impl FullscreenView {
     /// Starts the idle clock as the view opens and stops it as the view closes, so it never
     /// hides the cursor over the workspace. Either way the view next shows with its controls up.
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        if shown && self.constellation {
+            self.load_constellation_timing(cx);
+        }
+        self.watch_constellation_clock(shown, cx);
+        if !shown {
+            self.constellation_lyrics.reset_scene();
+        }
         self.flip(true);
         self.hidden = SpringState {
             position: 0.,
@@ -226,6 +246,9 @@ impl FullscreenView {
 
     /// Selects the fullscreen panel and restarts the controls' idle timer.
     fn show(&mut self, panel: Option<SideTab>, cx: &mut Context<Self>) {
+        self.constellation = false;
+        self.constellation_clock = None;
+        self.constellation_lyrics.reset_scene();
         if panel != self.panel && !cx.reduce_motion() {
             self.switch = Some(Entrance::start());
         }
@@ -241,6 +264,39 @@ impl FullscreenView {
             self.aside.update(cx, |aside, cx| aside.show(tab, cx));
         }
         self.stir(cx);
+    }
+
+    fn show_constellation(&mut self, cx: &mut Context<Self>) {
+        self.constellation = true;
+        self.load_constellation_timing(cx);
+        self.over_pill = false;
+        self.watch_constellation_clock(true, cx);
+        self.stir(cx);
+        cx.notify();
+    }
+
+    fn watch_constellation_clock(&mut self, shown: bool, cx: &mut Context<Self>) {
+        self.constellation_clock = (shown && self.constellation).then(|| {
+            cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor().timer(Duration::from_secs(1)).await;
+                    if this
+                        .update(cx, |this, cx| {
+                            this.load_constellation_timing(cx);
+                            cx.notify();
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+        });
+    }
+
+    fn load_constellation_timing(&self, cx: &mut Context<Self>) {
+        let lyrics = Sonora::global(cx).lyrics.clone();
+        lyrics.update(cx, |lyrics, cx| lyrics.ensure_constellation_timing(cx));
     }
 
     fn stir(&mut self, cx: &mut Context<Self>) {
@@ -796,7 +852,16 @@ impl FullscreenView {
 
     fn seek(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
-        let muted = theme.muted_foreground;
+        let muted = if self.constellation {
+            ui::Theme::dark().foreground.opacity(0.86)
+        } else {
+            theme.muted_foreground
+        };
+        let filled = if self.constellation {
+            muted
+        } else {
+            theme.progress_bar
+        };
         let empty = muted.opacity(0.3);
         let text = theme.text(Text::Tiny);
         let playback = self.playback.read(cx);
@@ -838,7 +903,7 @@ impl FullscreenView {
                     Scrubber::new(&self.seek, progress)
                         .name(t!("song-position"))
                         .value(clock(elapsed))
-                        .colors(theme.progress_bar, empty, theme.foreground)
+                        .colors(filled, empty, theme.foreground)
                         .enabled(seekable)
                         .when_some(bubble, |this, (at, text)| this.bubble(at, text))
                         .on_move(cx.listener(|this, fraction: &f32, _, cx| {
@@ -858,7 +923,7 @@ impl FullscreenView {
     /// corner to the leave button.
     fn controls(&self, room: Room, panel_hide: f32, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
-        let inline = self.panel.is_none();
+        let inline = self.constellation || self.panel.is_none();
         let clear = match room.fits(Room::Roomy) {
             true => Pixels::ZERO,
             false => theme.metrics.control_small,
@@ -981,8 +1046,8 @@ impl FullscreenView {
             }
             cx.notify();
         });
-        let tab = move |id: &'static str, icon: &'static str, hint: &'static str, panel| {
-            let showing = self.panel == panel;
+        let tab = |id: &'static str, icon: &'static str, hint: &'static str, panel| {
+            let showing = !self.constellation && self.panel == panel;
 
             Button::new(id)
                 .ghost()
@@ -1030,6 +1095,19 @@ impl FullscreenView {
                                 "queue-title",
                                 Some(SideTab::Queue),
                             )),
+                            Some(
+                                Button::new("fullscreen-constellation")
+                                    .ghost()
+                                    .when(frosted, Button::frosted)
+                                    .small()
+                                    .icon("icons/moon.svg")
+                                    .tooltip_above("fullscreen-constellation")
+                                    .selected(self.constellation)
+                                    .rounded(theme.radius)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.show_constellation(cx);
+                                    })),
+                            ),
                         ]
                         .into_iter()
                         .flatten(),
@@ -1305,7 +1383,7 @@ impl Render for FullscreenView {
         let theme = *cx.theme();
         let viewport = window.viewport_size();
         let room = Room::of(viewport.width);
-        let split = room.fits(Room::Wide) && self.panel.is_some();
+        let split = !self.constellation && room.fits(Room::Wide) && self.panel.is_some();
         self.watch(window, cx);
         let idle = self.hidden(window, cx);
         let switching = self.switching(window, cx);
@@ -1402,9 +1480,14 @@ impl Render for FullscreenView {
         };
 
         let style = self.settings.read(cx).visualizer_style();
-        let visualizer_on =
-            self.panel.is_none() && style.shown() && self.playback.read(cx).steered(cx).is_none();
-        match visualizer_on
+        let visualizer_on = !self.constellation
+            && self.panel.is_none()
+            && style.shown()
+            && self.playback.read(cx).steered(cx).is_none();
+        let constellation_audio = self.constellation
+            && ui::motion::animates(cx)
+            && self.playback.read(cx).wants_playing();
+        match (visualizer_on || constellation_audio)
             .then(|| self.playback.read(cx).spectrum(cx))
             .flatten()
         {
@@ -1439,9 +1522,7 @@ impl Render for FullscreenView {
             .flex_1()
             .min_h_0()
             .w_full()
-            .gap_5()
-            .px_8()
-            .pb_6()
+            .when(!self.constellation, |this| this.gap_5().px_8().pb_6())
             .on_click(|event: &ClickEvent, window, cx| {
                 if event.click_count() == 2 {
                     window.dispatch_action(Box::new(ToggleWindowFullscreen), cx);
@@ -1503,74 +1584,86 @@ impl Render for FullscreenView {
                         )),
                 )
             })
-            .child(
-                div()
-                    .relative()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .items_center()
-                    .justify_between()
-                    .gap_8()
-                    .when(staged, |this| {
-                        this.child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .items_center()
-                                .justify_center()
-                                .gap_5()
-                                .min_w_0()
-                                .when_else(
-                                    split,
-                                    |this| this.flex_1().h_full(),
-                                    |this| this.w_full(),
-                                )
-                                .map(|this| glide(this, shift, bleed, window))
-                                // A split column carries the pill in its dock, and its cover
-                                // holds still while the panel beside it enters.
-                                .when(!split, |this| entering(this, switching))
-                                .child(self.artwork(side, raster_side, cover_scale, cx))
-                                .child(self.meta(hide, lift, window, cx))
-                                .when(split, |this| {
-                                    this.child(self.dock(
-                                        theme.metrics.player_bar * DOCK,
-                                        hide,
-                                        inline_panel_hide,
-                                        false,
-                                        room,
-                                        cx,
-                                    ))
-                                }),
-                        )
-                    })
-                    .when(self.panel.is_some(), |this| {
-                        this.child(
-                            div()
-                                .id("fullscreen-panel")
-                                .relative()
-                                .flex()
-                                .flex_col()
-                                .flex_1()
-                                .min_w_0()
-                                .min_h_0()
-                                .h_full()
-                                .on_click(|_, _, cx| cx.stop_propagation())
-                                .child(entering(
-                                    div().size_full().min_h_0().child(self.aside.clone()),
-                                    switching,
-                                ))
-                                .when(panel_hide < 1., |this| {
-                                    this.child(self.floating(panel_hide, cx))
-                                }),
-                        )
-                    }),
-            )
-            .when(!split && self.panel.is_some(), |this| {
-                this.child(self.strip(hide, window, cx))
+            .when(self.constellation, |this| {
+                this.child(super::constellation::scene(
+                    self.playback.read(cx),
+                    &mut self.constellation_lyrics,
+                    self.visualizer.edge_light_levels(),
+                    window,
+                    cx,
+                ))
             })
-            .when(!split, |this| {
+            .when(!self.constellation, |this| {
+                this.child(
+                    div()
+                        .relative()
+                        .flex()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .items_center()
+                        .justify_between()
+                        .gap_8()
+                        .when(staged, |this| {
+                            this.child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .items_center()
+                                    .justify_center()
+                                    .gap_5()
+                                    .min_w_0()
+                                    .when_else(
+                                        split,
+                                        |this| this.flex_1().h_full(),
+                                        |this| this.w_full(),
+                                    )
+                                    .map(|this| glide(this, shift, bleed, window))
+                                    // A split column carries the pill in its dock, and its cover
+                                    // holds still while the panel beside it enters.
+                                    .when(!split, |this| entering(this, switching))
+                                    .child(self.artwork(side, raster_side, cover_scale, cx))
+                                    .child(self.meta(hide, lift, window, cx))
+                                    .when(split, |this| {
+                                        this.child(self.dock(
+                                            theme.metrics.player_bar * DOCK,
+                                            hide,
+                                            inline_panel_hide,
+                                            false,
+                                            room,
+                                            cx,
+                                        ))
+                                    }),
+                            )
+                        })
+                        .when(self.panel.is_some(), |this| {
+                            this.child(
+                                div()
+                                    .id("fullscreen-panel")
+                                    .relative()
+                                    .flex()
+                                    .flex_col()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .min_h_0()
+                                    .h_full()
+                                    .on_click(|_, _, cx| cx.stop_propagation())
+                                    .child(entering(
+                                        div().size_full().min_h_0().child(self.aside.clone()),
+                                        switching,
+                                    ))
+                                    .when(panel_hide < 1., |this| {
+                                        this.child(self.floating(panel_hide, cx))
+                                    }),
+                            )
+                        }),
+                )
+            })
+            .when(
+                !self.constellation && !split && self.panel.is_some(),
+                |this| this.child(self.strip(hide, window, cx)),
+            )
+            .when(!split && !self.constellation, |this| {
                 this.child(self.dock(
                     theme.metrics.player_bar * DOCK_FULL,
                     hide,
@@ -1579,6 +1672,32 @@ impl Render for FullscreenView {
                     room,
                     cx,
                 ))
+            })
+            .when(self.constellation && shown, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .bottom_6()
+                        .left_0()
+                        .right_0()
+                        .flex()
+                        .justify_center()
+                        .opacity(1. - hide)
+                        .child(
+                            div()
+                                .w_full()
+                                .max_w(theme.metrics.player_bar * 3.5)
+                                .p_3()
+                                .map(|panel| {
+                                    super::constellation::glass_controls(
+                                        panel,
+                                        self.constellation_lyrics.controls_tint,
+                                        cx,
+                                    )
+                                })
+                                .child(self.controls(room, inline_panel_hide, cx)),
+                        ),
+                )
             })
             .when(idle < 1., |this| this.child(self.leave(idle, window, cx)))
             .children(self.menu(cx))

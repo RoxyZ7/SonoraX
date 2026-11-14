@@ -35,6 +35,11 @@ const SCHEMA: &str = "
         fingerprint TEXT NOT NULL,
         lrc TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS constellation_word_timing (
+        track_key TEXT PRIMARY KEY,
+        fingerprint TEXT NOT NULL,
+        lyrics TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS plays (
         scope TEXT NOT NULL,
         provider TEXT NOT NULL,

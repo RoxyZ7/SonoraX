@@ -36,6 +36,26 @@ impl VisualizerDrive {
         self.state.borrow().shown.clone()
     }
 
+    /// Read the eased low and upper bands without copying the spectrum.
+    pub fn edge_light_levels(&self) -> [f32; 2] {
+        let state = self.state.borrow();
+        if !state.visible {
+            return [0.; 2];
+        }
+        let band_peak = |start, end| {
+            state
+                .shown
+                .left
+                .get(start..end)
+                .into_iter()
+                .flatten()
+                .chain(state.shown.right.get(start..end).into_iter().flatten())
+                .copied()
+                .fold(0., f32::max)
+        };
+        [band_peak(0, 7), band_peak(20, 32)]
+    }
+
     pub fn show(&self, watch: EntityId, spectrum: Spectrum, window: &mut Window) {
         let mut state = self.state.borrow_mut();
         state.visible = true;

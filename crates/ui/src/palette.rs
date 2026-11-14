@@ -6,6 +6,7 @@ use crate::artwork::sample_palette;
 
 const BINS: usize = 24;
 const SAMPLES: usize = 6000;
+const CENTER_BANDS: usize = 5;
 const MIN_ALPHA: u8 = 128;
 const MIN_SATURATION: f32 = 0.14;
 /// Dark covers still name their hue: the ambient background and the selection tint both
@@ -32,7 +33,35 @@ const SECONDARY_VIVID: f32 = 0.35;
 /// hand. Sampling walks at most `SAMPLES` pixels, so this costs nothing beside
 /// the decode that produced the frame.
 pub(crate) fn of_image(image: &RenderImage) -> CoverPalette {
-    image.as_bytes(0).map(sampled).unwrap_or_default()
+    let Some(bytes) = image.as_bytes(0) else {
+        return CoverPalette::default();
+    };
+    let mut palette = sampled(bytes);
+    let size = image.size(0);
+    let (width, height) = (usize::from(size.width), usize::from(size.height));
+    if width == 0 || height == 0 {
+        return palette;
+    }
+    palette.aspect = width as f32 / height as f32;
+    let pixels = bytes.as_chunks::<4>().0;
+    // The scene reads these bands at render time, so sample them once with the cover.
+    for (band, brightness) in palette.center_bands.iter_mut().enumerate() {
+        let mut sum = 0.;
+        for row in 0..8 {
+            let y = (band * 8 + row) * height / (CENTER_BANDS * 8);
+            for column in 0..12 {
+                let x = width * (24 + column * 4) / 100;
+                let [blue, green, red, alpha] = pixels[y * width + x];
+                let luma = (0.2126 * f32::from(red)
+                    + 0.7152 * f32::from(green)
+                    + 0.0722 * f32::from(blue))
+                    / 255.;
+                sum += luma * (f32::from(alpha) / 255.);
+            }
+        }
+        *brightness = sum / 96.;
+    }
+    palette
 }
 
 /// The dominant hue of the artwork at `url`, or none for near-greyscale art.
@@ -54,6 +83,23 @@ pub struct CoverPalette {
     /// sleeve that is nearly black and one that is nearly white both land here
     /// with no primary, and only this tells them apart.
     pub lightness: f32,
+    aspect: f32,
+    center_bands: [f32; CENTER_BANDS],
+}
+
+impl CoverPalette {
+    /// Estimate brightness across the center of a cover-fitted image at a normalized height.
+    pub fn cover_brightness_at(self, viewport_aspect: f32, y: f32) -> f32 {
+        if self.aspect <= 0. || viewport_aspect <= 0. {
+            return self.lightness;
+        }
+        let visible_height = (self.aspect / viewport_aspect).min(1.);
+        let image_y = 0.5 + (y - 0.5) * visible_height;
+        let band = (image_y * CENTER_BANDS as f32 - 0.5).clamp(0., (CENTER_BANDS - 1) as f32);
+        let low = band.floor() as usize;
+        let high = band.ceil() as usize;
+        self.center_bands[low] + (self.center_bands[high] - self.center_bands[low]) * band.fract()
+    }
 }
 
 /// Both hues of the artwork at `url` in a single pass over its pixels. A cover the
@@ -180,6 +226,7 @@ fn sampled(pixels: &[u8]) -> CoverPalette {
         primary,
         secondary,
         lightness: mean,
+        ..Default::default()
     }
 }
 

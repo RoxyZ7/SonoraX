@@ -120,6 +120,11 @@ impl Cue {
         self.played.load(Ordering::Relaxed)
     }
 
+    /// Identifies the run of queued samples that the current position belongs to.
+    pub(crate) fn generation(&self) -> u32 {
+        self.generation.load(Ordering::Relaxed)
+    }
+
     /// Decides a write: refused after a clear, reported when armed, plain otherwise. A clear
     /// that lands during the armed write wins, since that packet predates the seek behind it.
     pub(crate) fn admit(&self) -> bool {

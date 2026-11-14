@@ -1455,6 +1455,7 @@ response-graph-readout = { $frequency } · { $direction ->
        *[flat] { $gain }
     } dB
 
+fullscreen-constellation = Constellation
 dev-lyrics-next = Lyrics Doctor · Try another source
 lyrics-offset-earlier = Show lyrics 250 ms earlier
 lyrics-offset-later = Show lyrics 250 ms later

@@ -746,6 +746,40 @@ impl Playback {
         }
     }
 
+    /// The next track while its sound overlaps the one currently shown.
+    pub fn shown_crossfade<'a>(
+        &self,
+        cx: &'a App,
+    ) -> Option<(&'a Track, music::CrossfadePosition)> {
+        if self.steered(cx).is_some() || self.seek_in_flight.is_some() {
+            return None;
+        }
+        let outgoing = self.track.as_ref()?.id.as_deref()?;
+        let incoming = self.crossfade_target(cx)?;
+        let position = self
+            .active_engine()?
+            .crossfade_position(outgoing, incoming.id.as_deref()?)?;
+        Some((incoming, position))
+    }
+
+    /// The output's current position for frame-by-frame visuals, with the transport clock
+    /// as the fallback for remote playback, seeks in flight and engines without sample positions.
+    pub fn visual_position(&self, cx: &App) -> (Duration, bool) {
+        if let Some(remote) = self.steered(cx) {
+            return (remote.state.live_position(), remote.state.playing);
+        }
+        let position = self
+            .track
+            .as_ref()
+            .and_then(|track| track.id.as_deref())
+            .filter(|_| self.seek_in_flight.is_none())
+            .and_then(|id| self.engine_for(id)?.output_position(id));
+        (
+            position.unwrap_or_else(|| self.live_position()),
+            self.state == PlaybackState::Playing,
+        )
+    }
+
     /// The volume the controls show and change, on the other device while one is steered.
     pub fn shown_volume(&self, cx: &App) -> f32 {
         if let Some(level) = self.sliding {
@@ -1604,6 +1638,14 @@ impl Playback {
                     .as_deref()
                     .is_some_and(|id| music::is_local_id(id) == self.local_active())
             })
+    }
+
+    /// The track worth preparing for the visual overlap, even before its sound is queued.
+    pub fn crossfade_target<'a>(&self, cx: &'a App) -> Option<&'a Track> {
+        if self.crossfade == 0 || self.steered(cx).is_some() {
+            return None;
+        }
+        self.segue_target(cx)
     }
 
     /// Drops a prepared overlap if an edit to the queue or playback mode changes the next track.

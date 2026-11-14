@@ -204,7 +204,8 @@ jobs:
   bundle:
     name: macos app bundle
     needs: build
-    runs-on: macos-15
+    # lipo and hdiutil can package both slices without an ARM64 host.
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v5
 
@@ -272,6 +273,7 @@ jobs:
           cp \
             assets/fonts/LICENSE.txt \
             SonoraX.app/Contents/Resources/LICENSE.Inter
+          cp assets/fonts/OFL-NotoSans*.txt SonoraX.app/Contents/Resources/
 
           mkdir -p SonoraX.app/Contents/Resources/icons
           cp assets/icons/LICENSE SonoraX.app/Contents/Resources/icons/LICENSE
@@ -467,6 +469,7 @@ jobs:
           cp COPYING AppDir/usr/share/doc/sonora/LICENSE
           cp THIRD-PARTY.md AppDir/usr/share/doc/sonora/
           cp assets/fonts/LICENSE.txt AppDir/usr/share/doc/sonora/LICENSE.Inter
+          cp assets/fonts/OFL-NotoSans*.txt AppDir/usr/share/doc/sonora/
           cp assets/icons/LICENSE AppDir/usr/share/doc/sonora/icons/LICENSE
           for licence in assets/icons/*/LICENSE; do
             pack="$(basename "$(dirname "$licence")")"
@@ -712,14 +715,14 @@ jobs:
       - name: checksums
         run: cd dist && shasum -a 256 * > SHA256SUMS
 
+      - uses: taiki-e/install-action@parse-changelog
+
       - name: release notes
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          gh api -X POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
-            -f tag_name="$TAG" --jq .body > notes.md
+          parse-changelog CHANGELOG.md "${TAG#v}" > notes.md
           printf '\n[Code signing policy](https://github.com/%s#code-signing-policy)\n' "$GITHUB_REPOSITORY" >> notes.md
 
       - uses: softprops/action-gh-release@v2

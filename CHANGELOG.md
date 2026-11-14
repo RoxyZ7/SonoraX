@@ -7,7 +7,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.48.6] - 2026-11-07
+## [0.48.6] - 2026-11-14
 
 ### Added
 
@@ -17,12 +17,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Revisit songs from a month in your listening history and add them to the queue.
 - Let the ambient theme respond to music as it plays.
 
+### Changed
+
+- Constellation stars and their trails take on the album cover's colors and react to the music.
+- The glass clock in Constellation mode picks up a light tint from the cover in its soft reflections.
+- Sung words form constellations with triangular links that open as each new star lights up.
+- Constellations pass a light between phrases, expand with the music, and reveal the cover during instrumental breaks.
+- The glass clock adds definition when the artwork behind it is bright.
+- Constellation mode fades between songs, lifting the new cover into view as the clock and rim take on its colors.
+- The glass playback controls take on a subtle tint from the album cover.
+- Show overlapping backing vocals in separate, steady rows of smaller stars, each timed to its own words.
+- Automatically sync constellation words from YouTube Music vocals when lyrics only have line timing.
+- Send a short light trail between backing vocal stars.
+- Carry a trail of light from the outgoing song to the incoming vocal during Crossfade.
+
 ### Fixed
 
 - Improve Thai lyrics formatting and automatic timing.
 - Keep the app open when opening the font picker on Windows.
 - Detect new Nightly builds on the Nightly update channel.
 - Include Flatpak bundles for Linux x86-64 and ARM64 in stable releases.
+- Start the Constellation transition with the audio crossfade and show each track's lyrics on its own clock.
+- Split synced lyrics into stars in Thai and other scripts without spaces, keeping word timing when available.
 
 ## [0.48.5] - 2026-11-07
 

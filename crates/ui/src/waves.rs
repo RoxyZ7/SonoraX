@@ -22,6 +22,28 @@ const VIGNETTE: f32 = 0.6;
 const CEILING: f32 = 0.18;
 
 static WAVES: Effect = Effect::new("sonora-waves", include_str!("../shaders/waves.wgsl"));
+static CONSTELLATION_LIGHT: Effect = Effect::new(
+    "sonora-constellation-light",
+    include_str!("../shaders/constellation-light.wgsl"),
+);
+
+/// Paint the moving folds and perimeter light together over the artwork.
+pub fn constellation_light(
+    time: f32,
+    progress: f32,
+    audio: [f32; 2],
+    colors: [Hsla; 3],
+    change: f32,
+) -> impl IntoElement {
+    CONSTELLATION_LIGHT.fill(
+        ShaderInstance::at(time)
+            .params(0, &[progress, audio[0], audio[1], change])
+            .color(0, colors[0])
+            .color(1, colors[1])
+            .color(2, colors[2]),
+        Pixels::ZERO,
+    )
+}
 
 /// Five soft pools of colour morphing over a stage, with no shape that holds and nothing sharper
 /// than a heavy blur, for a field that fills a whole surface. Each pool is laid over the ones

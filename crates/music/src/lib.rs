@@ -687,8 +687,14 @@ impl PlaybackEvent {
     }
 }
 
-/// Transport control of one engine. Every call is fire-and-forget: the outcome arrives as a
-/// `PlaybackEvent`, never as a return value.
+/// How far the incoming track has reached the output during an audio crossfade.
+#[derive(Clone, Copy)]
+pub struct CrossfadePosition {
+    pub incoming: Duration,
+    pub progress: f32,
+}
+
+/// Transport control of one engine. Transport commands report back as `PlaybackEvent`s.
 pub trait Player: Send + Sync {
     /// Fetches a track and plays it from `at`. A `seamless` load is a queue segue: a gapless
     /// engine keeps what it has queued so the join has no gap, any other load drops it.
@@ -704,6 +710,14 @@ pub trait Player: Send + Sync {
     fn clear_segue(&self) {}
     /// Changes the overlap on future automatic transitions.
     fn set_crossfade(&self, _seconds: u8) {}
+    /// Reports a mix only once samples of this pair start reaching the output.
+    fn crossfade_position(&self, _outgoing: &str, _incoming: &str) -> Option<CrossfadePosition> {
+        None
+    }
+    /// Samples the output clock when this engine has already started the named track.
+    fn output_position(&self, _id: &str) -> Option<Duration> {
+        None
+    }
     fn play(&self);
     fn pause(&self);
 

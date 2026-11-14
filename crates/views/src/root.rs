@@ -1130,6 +1130,8 @@ impl Render for Root {
         // the page colour under it would only stack a second alpha beneath that and leave a
         // see-through fullscreen reading nearly solid.
         let ambient = matches!(self.view, RootView::Fullscreen) && ambient::shown(cx);
+        let hide_title_bar =
+            matches!(self.view, RootView::Fullscreen) && window.is_fullscreen() && !show_sign_in;
 
         // The shell enters the way a page enters the workspace. An opaque window fades it
         // under a scrim of the page colour, which leaves the workspace's cached views alone,
@@ -1242,14 +1244,16 @@ impl Render for Root {
             .when(ambient, |this| this.child(self.ambient.clone()))
             // The bar only changes when it is told to, so a frame drawn for the lyrics or the
             // progress bar replays it rather than building it again.
-            .child(
-                self.title_bar.clone().cached(
-                    StyleRefinement::default()
-                        .w_full()
-                        .h(ui::snapped(theme.metrics.title_bar, window))
-                        .flex_none(),
-                ),
-            )
+            .when(!hide_title_bar, |this| {
+                this.child(
+                    self.title_bar.clone().cached(
+                        StyleRefinement::default()
+                            .w_full()
+                            .h(ui::snapped(theme.metrics.title_bar, window))
+                            .flex_none(),
+                    ),
+                )
+            })
             .when_else(
                 show_sign_in,
                 |this| this.child(div().flex().flex_1().min_h_0().child(self.login.clone())),

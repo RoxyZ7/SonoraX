@@ -36,6 +36,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Flags: ignoreversion
 Source: "..\..\COPYING"; DestDir: "{app}"; DestName: "LICENSE"; Flags: ignoreversion
+Source: "..\..\assets\fonts\OFL-NotoSans*.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\THIRD-PARTY.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

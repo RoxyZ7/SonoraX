@@ -1455,6 +1455,7 @@ response-graph-readout =
        *[flat] { $gain }
     } dB
 
+fullscreen-constellation = กลุ่มดาว
 dev-lyrics-next = Lyrics Doctor · ลองเนื้อเพลงจากแหล่งอื่น
 lyrics-offset-earlier = เลื่อนเนื้อเพลงให้เร็วขึ้น 250 ms
 lyrics-offset-later = เลื่อนเนื้อเพลงให้ช้าลง 250 ms

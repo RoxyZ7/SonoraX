@@ -17,6 +17,7 @@ cd "$ROOT"
 cp COPYING "$STAGE/LICENSE"
 cp THIRD-PARTY.md "$STAGE/THIRD-PARTY.md"
 cp assets/fonts/LICENSE.txt "$STAGE/LICENSE.Inter"
+cp assets/fonts/OFL-NotoSans*.txt "$STAGE/"
 mkdir -p "$STAGE/icons"
 cp assets/icons/LICENSE "$STAGE/icons/LICENSE"
 for licence in assets/icons/*/LICENSE; do
