@@ -38,6 +38,11 @@ SonoraX is an unofficial community fork with its own public source, Windows, Lin
           <img width="1555" height="966" alt="image" src="https://github.com/user-attachments/assets/f27400ab-9264-4d82-9a70-e0a60e0c3a5f" />
         </td>
       </tr>
+      <tr>
+        <td colspan="2">
+          <img src="./.github/screenshots/constellation.png" alt="SonoraX Constellation lyrics with glowing stars and album-colored lighting" width="1556" />
+        </td>
+      </tr>
     </table>
 </div>
 <div align="center">
