@@ -25,9 +25,9 @@ include!(concat!(env!("OUT_DIR"), "/themes.rs"));
 
 const FORMAT_VERSION: u32 = 1;
 /// The scheme every link meant for Sonora itself uses.
-const SCHEME: &str = "sonora:";
+const SCHEMES: [&str; 2] = ["sonorax:", "sonora:"];
 /// What a theme link starts with. The theme file or family follows as unpadded base64url.
-const THEME_LINK: &str = "sonorax://theme/";
+const THEME_LINKS: [&str; 2] = ["sonorax://theme/", "sonora://theme/"];
 /// The longest theme link read. A full theme file encodes to about 2 KiB.
 const LINK_LIMIT: usize = 16 * 1024;
 /// How many variants a linked family may have.
@@ -322,9 +322,11 @@ pub(super) fn load(directory: &Path, previous: &[ThemeVariant]) -> Loaded {
 /// Whether `text` is a link in Sonora's own scheme, which no provider reads and which is never
 /// a file to play.
 pub fn is_own_link(text: &str) -> bool {
-    text.trim()
-        .get(..SCHEME.len())
-        .is_some_and(|scheme| scheme.eq_ignore_ascii_case(SCHEME))
+    SCHEMES.into_iter().any(|scheme| {
+        text.trim()
+            .get(..scheme.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
+    })
 }
 
 /// Reads the theme a `sonorax://theme/` link carries. The link has to be short, its payload pure
@@ -334,10 +336,12 @@ pub fn is_own_link(text: &str) -> bool {
 pub fn read_link(text: &str) -> Result<ThemeOffer> {
     let text = text.trim();
     anyhow::ensure!(text.len() <= LINK_LIMIT, "theme link is too long");
-    let payload = text
-        .get(..THEME_LINK.len())
-        .filter(|prefix| prefix.eq_ignore_ascii_case(THEME_LINK))
-        .map(|_| &text[THEME_LINK.len()..])
+    let payload = THEME_LINKS
+        .into_iter()
+        .find_map(|link| {
+            let (prefix, payload) = text.split_at_checked(link.len())?;
+            prefix.eq_ignore_ascii_case(link).then_some(payload)
+        })
         .context("not a theme link")?;
     // a browser on Windows may hand the link over with a slash added
     let payload = payload.strip_suffix('/').unwrap_or(payload);

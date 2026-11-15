@@ -1,4 +1,4 @@
-//! The question before a theme or family from a `sonora://theme/` link is installed, with its
+//! The question before a theme or family from a `sonorax://theme/` link is installed, with its
 //! name in the title, a miniature of the window cut into its variants, their names under it, and
 //! Install or Cancel.
 //! `state::Links` holds the offer and does the installing. This only draws it.

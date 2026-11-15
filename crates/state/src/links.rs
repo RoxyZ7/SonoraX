@@ -1,5 +1,5 @@
 //! Links handed to the app from outside, by the system or on the command line, opened on the
-//! provider they belong to. Sonora's own `sonora:` links offer a theme to install instead.
+//! provider they belong to. SonoraX's own `sonorax:` links offer a theme to install instead.
 
 use gpui::{App, Context, Entity, EventEmitter, Task};
 use music::link::{self, Linked};
@@ -66,9 +66,9 @@ impl Links {
         }
         self.following = None;
         self.waiting = None;
-        if let Some(address) = link::address(text)
-            .filter(|address| address.scheme() == "sonora" && address.host_str() == Some("open"))
-        {
+        if let Some(address) = link::address(text).filter(|address| {
+            matches!(address.scheme(), "sonorax" | "sonora") && address.host_str() == Some("open")
+        }) {
             if let Some(target) = link::query(&address, "url")
                 && self.session.read(cx).read_link(&target).is_some()
             {
