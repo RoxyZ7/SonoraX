@@ -36,6 +36,7 @@ mod settings;
 mod sheets;
 mod signal;
 mod snapshot;
+mod soloist;
 mod song;
 mod tags;
 mod toast;
@@ -87,13 +88,14 @@ pub use session::{Failure, ProviderInfo, Session, SessionEvent, SessionState};
 pub use settings::{
     AppSettings, ConnectName, DiscordName, FilterValue, FullscreenControlsAutohide, LYRICS_SOURCES,
     PlayerBarLayout, Reloaded, RomanizationScripts, SYSTEM_FONT, SideTab, ThemeFamily, ThemeOffer,
-    ThemeVariant, equalizer_profile_label, remember_window, window_placement,
+    ThemeVariant, VisualizerScreens, equalizer_profile_label, remember_window, window_placement,
 };
 pub use signal::{Change, Equalizing, FLOAT_BITS, Following, Signal, SignalPath};
+pub use soloist::{Soloist, SoloistProblem, SoloistState, SoloistStep, SoloistSwitched};
 pub use song::SongDetail;
 pub use tags::{TagState, Tags};
 pub use toast::{Outcome, Target, Toast, ToastAction, Toasts};
-pub use updates::{Channel, Release, UpdateState, Updates, VERSION, updates_itself};
+pub use updates::{Channel, Release, UpdateState, Updates, VERSION, updates_itself, version};
 pub use usage::Usage;
 pub use vault::CACHE_GB_RANGE;
 pub use wake::Wake;
@@ -225,6 +227,7 @@ pub struct Sonora {
     pub devices: Entity<Devices>,
     pub downloads: Entity<Downloads>,
     pub drm: Entity<Drm>,
+    pub soloist: Entity<Soloist>,
     pub equalizer: Entity<Equalizer>,
     pub library: Entity<Library>,
     pub links: Entity<Links>,
@@ -358,6 +361,7 @@ pub fn init(
     });
     let cover = cx.new(|cx| Cover::new(session.clone(), playback.clone(), io.clone(), cx));
     let drm = cx.new(|cx| Drm::new(session.clone(), io.clone(), cx));
+    let soloist = cx.new(|cx| Soloist::new(session.clone(), io.clone(), cx));
     let updates = cx.new(|cx| Updates::new(settings.clone(), io.clone(), cx));
     let requirements = cx.new(|cx| {
         Requirements::new(
@@ -394,6 +398,17 @@ pub fn init(
             cx,
         )
     });
+    // Soloist lists itself on the account's devices, so this app comes off that list before the
+    // engine changes hands and goes back on once librespot plays again.
+    cx.subscribe(&soloist, {
+        let playback = playback.clone();
+        let devices = devices.clone();
+        move |_, _: &SoloistSwitched, cx| {
+            devices.update(cx, |devices, cx| devices.apply(cx));
+            playback.update(cx, |playback, cx| playback.switch_engine(cx));
+        }
+    })
+    .detach();
     let links = cx.new(|cx| Links::new(session.clone(), devices.clone(), settings.clone(), cx));
     let control = cx.new(|cx| Control::new(session.clone(), playback.clone(), library.clone(), cx));
     discord::attach(
@@ -413,6 +428,7 @@ pub fn init(
         devices,
         downloads,
         drm,
+        soloist,
         equalizer,
         library,
         links,
@@ -434,4 +450,9 @@ pub fn init(
         usage,
         wake,
     });
+}
+
+/// Renders a SHA-256 digest in the same lowercase form used in release checksums.
+fn sha256_hex(digest: &[u8]) -> String {
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }

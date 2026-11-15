@@ -145,7 +145,7 @@ pub(crate) async fn ensure_engine() -> Result<PathBuf> {
         .bytes()
         .await?;
     anyhow::ensure!(
-        format!("{:x}", Sha256::digest(&archive_bytes)) == expected,
+        crate::sha256_hex(&Sha256::digest(&archive_bytes)) == expected,
         "lyrics engine archive failed its SHA-256 check"
     );
     tokio::task::spawn_blocking({
@@ -172,7 +172,7 @@ pub(crate) async fn ensure_engine() -> Result<PathBuf> {
     }
     tokio::io::AsyncWriteExt::flush(&mut model_file).await?;
     anyhow::ensure!(
-        format!("{:x}", digest.finalize()) == MODEL_SHA256,
+        crate::sha256_hex(&digest.finalize()) == MODEL_SHA256,
         "lyrics model failed its SHA-256 check"
     );
     drop(model_file);
@@ -254,7 +254,7 @@ fn extract_engine(archive: &[u8], destination: &Path) -> Result<()> {
 
 /// Invalidates a timing if the lyrics text or the alignment implementation changes.
 pub(crate) fn fingerprint(text: &str) -> String {
-    format!("v2:{:x}", Sha256::digest(text.as_bytes()))
+    format!("v2:{}", crate::sha256_hex(&Sha256::digest(text.as_bytes())))
 }
 
 pub(crate) fn cached(db: &Database, key: &str, version: &str) -> Result<Option<String>> {

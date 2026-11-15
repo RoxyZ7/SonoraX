@@ -7,6 +7,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.49.1] - 2026-11-15
+
+### Added
+
+- Open music links through search or from a browser.
+- Fold the sidebar down to icons and optionally show genres in song lists.
+- Prefer word-synced lyrics when choosing between providers.
+- Set up Spotify Soloist from the playback settings.
+- Choose where the visualizer appears in the fullscreen player.
+
+### Changed
+
+- Ease the fullscreen player and album cover in and out.
+
+### Fixed
+
+- Preserve punctuation in lyrics that mix scripts.
+- Recover Apple Music lyrics across matching album editions.
+- Save Subsonic downloads as standalone audio files.
+
 ## [0.48.6] - 2026-11-14
 
 ### Added
@@ -75,6 +95,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An artist's page links to the songs of theirs you have in your Favorites, so you can see and play them together, and take one out with the X that appears when you point at it.
 - Turn off Show lyrics in the lyrics settings to hide the lyrics buttons in the player bar and
   Now playing, and stop Sonora looking lyrics up.
+- Drag the left sidebar's edge all the way in to fold it down to icons, with each name shown
+  beside its icon on hover. Your Library and Local Music open a menu beside the folded sidebar
+  that lists Songs, Albums, Artists and Playlists by name.
+  Keep dragging to close it, and the toggle brings it back as it was. A narrowing window folds
+  the sidebar to icons before hiding it.
+- Right-click an album or a playlist and pick Go to album or Go to playlist to open its page.
 
 ### Changed
 
@@ -2608,7 +2634,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Initial release: a native Spotify client with playback, an interactive queue, the saved library,
 search, album, playlist, artist and song pages, context menus and adaptive theming.
 
-[unreleased]: https://github.com/sonorahq/sonora/compare/v0.48.0...HEAD
+[unreleased]: https://github.com/sonorahq/sonora/compare/v0.49.1...HEAD
+[0.49.1]: https://github.com/sonorahq/sonora/compare/v0.49.0...v0.49.1
+[0.49.0]: https://github.com/sonorahq/sonora/compare/v0.48.1...v0.49.0
+[0.48.1]: https://github.com/sonorahq/sonora/compare/v0.48.0...v0.48.1
 [0.48.0]: https://github.com/sonorahq/sonora/compare/v0.47.0...v0.48.0
 [0.47.0]: https://github.com/sonorahq/sonora/compare/v0.46.0...v0.47.0
 [0.46.0]: https://github.com/sonorahq/sonora/compare/v0.45.0...v0.46.0

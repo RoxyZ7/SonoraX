@@ -65,6 +65,8 @@ pub struct Lyrics {
     /// The order of the sources the answer on show was ranked by. A new order looks the track
     /// up again, from what is held, so the source now ranked first is the one shown.
     priority: Vec<String>,
+    /// Whether the answer on show was ranked with word-by-word lyrics ahead of the source order.
+    worded_first: bool,
     playback: Entity<Playback>,
     session: Entity<Session>,
     settings: Entity<AppSettings>,
@@ -118,13 +120,18 @@ impl Lyrics {
             let on = settings.lyrics_enabled();
             let enabled = settings.lyrics_providers();
             let priority = settings.lyrics_provider_priority();
-            if on == this.enabled && enabled == this.enabled_providers && priority == this.priority
+            let worded_first = settings.lyrics_word_synced_first();
+            if on == this.enabled
+                && enabled == this.enabled_providers
+                && priority == this.priority
+                && worded_first == this.worded_first
             {
                 return;
             }
             this.enabled = on;
             this.enabled_providers = enabled.to_vec();
             this.priority = priority;
+            this.worded_first = worded_first;
             this.task = None;
             this.ahead = None;
             this.ahead_of = None;
@@ -136,6 +143,7 @@ impl Lyrics {
         let enabled = settings.read(cx).lyrics_enabled();
         let enabled_providers = settings.read(cx).lyrics_providers().to_vec();
         let priority = settings.read(cx).lyrics_provider_priority();
+        let worded_first = settings.read(cx).lyrics_word_synced_first();
         let store = Sheets::new(storage::Cache::standard());
         let moving = store.clone();
         let migration = cx
@@ -169,6 +177,7 @@ impl Lyrics {
             enabled,
             enabled_providers,
             priority,
+            worded_first,
             playback,
             session,
             settings,
@@ -645,15 +654,16 @@ impl Lyrics {
     }
 
     fn follow_providers(&mut self, id: String, track: Track, cx: &mut Context<Self>) {
+        let query = self.query(&track, &id, cx);
         // A file's own lyrics are never cached, so an edit to its tags shows on the next play.
         if !self.reads_file(&id, cx)
             && let Some(found) = self.recall(&id)
+            && found.usable(&query, &self.enabled_providers)
             && self
                 .asked(&id, cx)
                 .iter()
                 .all(|provider| found.covers(provider))
         {
-            let query = self.query(&track, &id, cx);
             self.show(&found, &query, cx);
             return;
         }
@@ -670,10 +680,11 @@ impl Lyrics {
             .cloned()
             .collect();
         let priority = settings.lyrics_provider_priority();
+        let worded_first = settings.lyrics_word_synced_first();
         let instrumental = music::lyrics::instrumental(query, &hits);
         self.task = None;
         self.settled = true;
-        self.hits = ordered(query, hits, &priority);
+        self.hits = ordered(query, hits, &priority, worded_first);
         self.state = state_for(&self.hits, instrumental);
         cx.notify();
         self.prefetch(cx);
@@ -953,6 +964,7 @@ impl Lyrics {
     fn fetch(&mut self, id: String, track: Track, cx: &mut Context<Self>) -> Task<()> {
         let settings = self.settings.read(cx);
         let priority = settings.lyrics_provider_priority();
+        let worded_first = settings.lyrics_word_synced_first();
         let enabled: Vec<&'static str> = self
             .providers
             .iter()
@@ -1000,7 +1012,7 @@ impl Lyrics {
             // Services that replied empty are asked again while nothing usable is stored:
             // catalogues grow, and the one source that had anything may since have been
             // switched off, leaving a stored answer with no enabled hits.
-            let stored = cached.hits.iter().any(|hit| enabled.contains(&hit.source));
+            let stored = cached.usable(&query, &enabled);
             let providers: Vec<Arc<dyn LyricsProvider>> = asked
                 .into_iter()
                 .filter(|provider| !stored || !cached.covers(provider))
@@ -1011,7 +1023,7 @@ impl Lyrics {
                         .hits
                         .iter()
                         .filter(|hit| enabled.contains(&hit.source));
-                    let best = ordered(&query, held.cloned().collect(), &priority)
+                    let best = ordered(&query, held.cloned().collect(), &priority, worded_first)
                         .into_iter()
                         .next();
                     this.prepare(&id, &saved, best, cx);
@@ -1029,6 +1041,11 @@ impl Lyrics {
                 .hits
                 .iter()
                 .filter(|hit| enabled.contains(&hit.source))
+                .filter(|hit| {
+                    !providers
+                        .iter()
+                        .any(|provider| provider.name() == hit.source)
+                })
                 .cloned()
                 .collect();
             let (sender, mut incoming) = tokio::sync::mpsc::unbounded_channel();
@@ -1046,7 +1063,7 @@ impl Lyrics {
             while let Some((from, mut found)) = incoming.recv().await {
                 pending.retain(|name| Some(*name) != from);
                 hits.append(&mut found);
-                let ranked = ordered(&ranking, hits.clone(), &priority);
+                let ranked = ordered(&ranking, hits.clone(), &priority, worded_first);
                 let Some(best) = ranked.first().cloned() else {
                     continue;
                 };
@@ -1077,7 +1094,7 @@ impl Lyrics {
                         this.keep(id, cached, &hits, answered, cx);
                         if current {
                             let instrumental = music::lyrics::instrumental(&ranking, &hits);
-                            let ranked = ordered(&ranking, hits, &priority);
+                            let ranked = ordered(&ranking, hits, &priority, worded_first);
                             this.settle(ranked, None, instrumental, cx);
                         }
                     }
@@ -1172,9 +1189,8 @@ impl Lyrics {
             .or_else(|| ranked.first())
     }
 
-    /// Adds what the services said in this lookup to the track's answer and saves it when one of
-    /// them replied for the first time. A service that failed stays out of `answered`, so the
-    /// next lookup asks it again.
+    /// Replaces each successful source's stored answer with what it said in this lookup, including
+    /// a source retried after an empty answer. Failed sources keep their previous answers.
     fn keep(
         &mut self,
         id: String,
@@ -1187,17 +1203,20 @@ impl Lyrics {
         if !self.online(&id, cx) {
             return;
         }
-        let fresh: Vec<&'static str> = answered
-            .into_iter()
-            .filter(|name| *name != LOCAL && !found.answered.contains(name))
-            .collect();
-        if !fresh.is_empty() {
+        let answered: Vec<&'static str> =
+            answered.into_iter().filter(|name| *name != LOCAL).collect();
+        if !answered.is_empty() {
+            found.hits.retain(|hit| !answered.contains(&hit.source));
             found.hits.extend(
                 hits.iter()
-                    .filter(|hit| fresh.contains(&hit.source))
+                    .filter(|hit| answered.contains(&hit.source))
                     .cloned(),
             );
-            found.answered.extend(fresh);
+            for name in answered {
+                if !found.answered.contains(&name) {
+                    found.answered.push(name);
+                }
+            }
             if !found.hits.is_empty() {
                 let key = self.key(&id, cx);
                 self.unsaved
@@ -1307,8 +1326,13 @@ fn same(left: &LyricsHit, right: &LyricsHit) -> bool {
         && left.lyrics.worded() == right.lyrics.worded()
 }
 
-fn ordered(query: &LyricsQuery, hits: Vec<LyricsHit>, priority: &[String]) -> Vec<LyricsHit> {
-    let mut ranked = music::lyrics::rank_with_priority(query, hits, priority);
+fn ordered(
+    query: &LyricsQuery,
+    hits: Vec<LyricsHit>,
+    priority: &[String],
+    worded_first: bool,
+) -> Vec<LyricsHit> {
+    let mut ranked = music::lyrics::rank_with_priority(query, hits, priority, worded_first);
     music::lyrics::reshape(&mut ranked);
     ranked
 }
@@ -1367,9 +1391,17 @@ struct Found {
 }
 
 impl Found {
-    /// Whether `provider` has nothing left to say. A service that replied is covered, but one
-    /// that replied empty is asked again while the stored answer holds nothing usable from
-    /// an enabled source. A file's own lyrics are never covered, since they are read again
+    /// Whether an enabled source has lyrics that can be shown, or confirms an instrumental.
+    fn usable(&self, query: &LyricsQuery, enabled: &[impl AsRef<str>]) -> bool {
+        self.hits.iter().any(|hit| {
+            enabled.iter().any(|name| name.as_ref() == hit.source)
+                && (music::lyrics::eligible(query, hit)
+                    || (hit.instrumental && music::lyrics::matched(query, hit)))
+        })
+    }
+
+    /// Whether `provider` has replied. Callers only reuse that answer while an enabled source
+    /// holds something usable. A file's own lyrics are never covered, since they are read again
     /// on every play.
     fn covers(&self, provider: &Arc<dyn LyricsProvider>) -> bool {
         provider.name() != LOCAL && self.answered.contains(&provider.name())
@@ -1416,6 +1448,11 @@ async fn gather(
                     // Hits for another track are dropped here, before the lookup holds and
                     // copies them.
                     found.retain(|hit| music::lyrics::matched(&query, hit));
+                    log::debug!(
+                        "lyrics: {name} returned {} matching answer(s) for {}",
+                        found.len(),
+                        query.title
+                    );
                     found
                 });
             (name, found)

@@ -43,6 +43,7 @@ fn detect<'a>(texts: impl Iterator<Item = &'a str>) -> Option<WritingSystem> {
     dominant_system(&text)
 }
 
+/// Leaves lines without non-Latin letters untouched, regardless of the song's writing system.
 fn convert(text: &str, system: WritingSystem) -> Option<RomanizedText> {
     // Thai needs word segmentation and pronunciation rules. The character-wise fallback
     // can join whole lines together and leave combining marks on Latin letters.
@@ -52,6 +53,10 @@ fn convert(text: &str, system: WritingSystem) -> Option<RomanizedText> {
     {
         return None;
     }
+    if !text.chars().any(non_latin_letter) {
+        return None;
+    }
+
     let romanized = match system {
         WritingSystem::Japanese => super::japanese::romanize(text),
         _ => universal(text),

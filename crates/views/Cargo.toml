@@ -23,3 +23,6 @@ icu_segmenter.workspace = true
 ttf-parser = "0.25"
 [dev-dependencies]
 gpui_platform.workspace = true
+
+[lints]
+workspace = true

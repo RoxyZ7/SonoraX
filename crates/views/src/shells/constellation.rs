@@ -290,7 +290,7 @@ impl LyricTimeline {
             .is_some_and(|id| self.art.as_ref().and_then(|art| art.id.as_ref()) == Some(&id));
         if joined {
             std::mem::swap(&mut self.sky, &mut self.incoming_sky);
-            self.palette = self.incoming_palette.take().or(self.palette.take());
+            self.palette = self.incoming_palette.take().or_else(|| self.palette.take());
             self.exit = None;
         } else if motion {
             let keep_old = self
@@ -428,7 +428,7 @@ impl LyricSky {
                         .map(|_| line.start.saturating_add(Duration::from_secs(4)))
                 })
                 .or(next)
-                .unwrap_or(line.start.saturating_add(Duration::from_secs(5)))
+                .unwrap_or_else(|| line.start.saturating_add(Duration::from_secs(5)))
                 .min(next.unwrap_or(Duration::MAX));
             let nodes = lyric_nodes(line, end);
             if nodes.is_empty() {
@@ -1299,7 +1299,7 @@ fn scene_colors(
 ) -> SceneColors {
     let tint = palette
         .and_then(|palette| palette.primary)
-        .or(cx.theme().tint);
+        .or_else(|| cx.theme().tint);
     let glow = tint.map_or(dark.foreground, |tint| dark.primary_of(tint));
     let edge_color = |color: Hsla| Hsla {
         l: color.l.clamp(0.49, 0.69),
@@ -1313,11 +1313,11 @@ fn scene_colors(
     };
     let first = palette
         .map(|palette| palette.primary.unwrap_or(neutral))
-        .or(cx.theme().tint)
+        .or_else(|| cx.theme().tint)
         .unwrap_or(neutral);
     let second = palette
         .and_then(|palette| palette.secondary)
-        .unwrap_or(Hsla {
+        .unwrap_or_else(|| Hsla {
             h: (first.h + 0.085).rem_euclid(1.),
             l: (first.l + 0.12).min(1.),
             ..first

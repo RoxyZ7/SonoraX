@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use gpui::accesskit::Toggled;
 use gpui::prelude::*;
-use gpui::{AnimationExt as _, App, Entity, SharedString, div, svg};
+use gpui::{AnimationExt as _, App, Entity, Global, SharedString, div, svg};
 use i18n::t;
 use state::{Elsewhere, Playback, Repeat, Sonora};
 use ui::{ActiveTheme as _, Button, Motion};
@@ -10,6 +10,21 @@ use ui::{ActiveTheme as _, Button, Motion};
 use crate::shared::ambient;
 
 pub(crate) const NOTCH: f32 = 0.05;
+/// The name the playing cover is seen under, so the fullscreen player's cover flies in from the
+/// player bar's.
+pub(crate) const COVER_FLIGHT: &str = "playing-cover";
+
+/// Whether the playing cover is in the air between the player bar and the fullscreen player,
+/// so the player bar leaves its own undrawn until the flight lands.
+pub(crate) struct CoverAway(pub(crate) bool);
+
+impl Global for CoverAway {}
+
+/// How much of the opening fullscreen player shows yet, from 0 to 1, which its cover fades in
+/// by while it flies above the fade the rest of the player is under.
+pub(crate) struct CoverFade(pub(crate) f32);
+
+impl Global for CoverFade {}
 const STEP: f32 = 0.004;
 
 /// The other device playback is on, which the player shows instead of this app's own.
@@ -97,20 +112,24 @@ pub(crate) fn toggle(playback: &Entity<Playback>, big: bool, frosted: bool, cx: 
     let idle = held.track().is_none() && steered.is_none();
     let playback = playback.clone();
 
-    let (id, icon, tooltip) = match playing {
-        true => ("pause", "icons/pause.svg", "play-pause"),
-        false => ("play", "icons/play.svg", "play-resume"),
+    let (icon, tooltip) = match playing {
+        true => ("icons/pause.svg", "play-pause"),
+        false => ("icons/play.svg", "play-resume"),
     };
 
-    let toggle = Button::new(if big { "fullscreen-play-pause" } else { id })
-        .ghost()
-        .when(frosted, Button::frosted)
-        .when(!big, Button::small)
-        .tooltip_above(tooltip)
-        .disabled(idle)
-        .on_click(move |_, _, cx| {
-            playback.update(cx, |playback, cx| playback.toggle_play(cx));
-        });
+    let toggle = Button::new(if big {
+        "fullscreen-play-pause"
+    } else {
+        "play-pause"
+    })
+    .ghost()
+    .when(frosted, Button::frosted)
+    .when(!big, Button::small)
+    .tooltip_above(tooltip)
+    .disabled(idle)
+    .on_click(move |_, _, cx| {
+        playback.update(cx, |playback, cx| playback.toggle_play(cx));
+    });
     match big {
         true => toggle.leading(fullscreen_play_icon(playing, cx)),
         false => toggle.icon(icon),

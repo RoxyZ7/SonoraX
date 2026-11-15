@@ -51,7 +51,7 @@
       };
 
       # The nightly prerelease, in the same shape as `release` plus its tag. Only the commit the
-      # nightly workflow tags `nightly` carries this file, so `github:sonorahq/sonora/nightly` is
+      # nightly workflow tags `nightly` carries this file, so `github:RoxyZ7/SonoraX/nightly` is
       # the one flake ref that installs it.
       nightly = lib.optionalAttrs (builtins.pathExists ./nix/nightly.json) (
         lib.importJSON ./nix/nightly.json

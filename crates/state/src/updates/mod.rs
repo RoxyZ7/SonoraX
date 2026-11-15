@@ -1,3 +1,4 @@
+mod build;
 mod install;
 
 use std::io::Write as _;
@@ -34,7 +35,8 @@ const AGENT: &str = concat!(
 
 /// The builds Sonora updates to. Stable follows tagged releases, and Nightly follows the build
 /// of main the nightly workflow publishes every night.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
 pub enum Channel {
     Stable,
     Nightly,
@@ -45,10 +47,7 @@ impl Channel {
 
     /// The channel the running build came from.
     pub fn running() -> Self {
-        match VERSION.contains("-nightly") {
-            true => Self::Nightly,
-            false => Self::Stable,
-        }
+        build::Build::current().channel
     }
 
     pub fn id(self) -> &'static str {
@@ -82,6 +81,11 @@ impl Channel {
     }
 }
 
+/// The package's displayed version, falling back to the compiled version for portable copies.
+pub fn version() -> &'static str {
+    &build::Build::current().version
+}
+
 /// Whether this copy of Sonora installs its own updates, which is when a channel can be chosen.
 /// A copy a package manager installed, or a portable one, does not.
 pub fn updates_itself() -> bool {
@@ -110,7 +114,7 @@ pub struct Updates {
     http: reqwest::Client,
     io: Io,
     task: Option<Task<()>>,
-    /// SonoraX currently follows stable releases.
+    /// The channel selected for this build.
     channel: Channel,
     first_check: bool,
     _poll: Task<()>,
@@ -118,7 +122,7 @@ pub struct Updates {
 
 impl Updates {
     pub fn new(_settings: Entity<AppSettings>, io: Io, cx: &mut Context<Self>) -> Self {
-        let channel = Channel::Stable;
+        let channel = Channel::running();
         let mut updates = Self {
             state: UpdateState::Quiet,
             http: reqwest::Client::new(),
@@ -359,7 +363,8 @@ async fn download(
     }
     drop(file);
 
-    if format!("{:x}", hasher.finalize()) != expected {
+    let checksum = crate::sha256_hex(&hasher.finalize());
+    if checksum != expected {
         std::fs::remove_file(&path).ok();
         anyhow::bail!("the update does not match its checksum");
     }
@@ -373,7 +378,7 @@ fn wanted(channel: Channel, offered: &str) -> bool {
     if channel != Channel::running() {
         return true;
     }
-    match (ordered(offered), ordered(VERSION)) {
+    match (ordered(offered), ordered(version())) {
         (Some(offered), Some(running)) => offered > running,
         _ => false,
     }
@@ -385,7 +390,7 @@ fn ordered(version: &str) -> Option<(u64, u64, u64, u64)> {
     let (core, rest) = version
         .trim()
         .split_once(['-', '+'])
-        .unwrap_or((version.trim(), ""));
+        .unwrap_or_else(|| (version.trim(), ""));
     let mut parts = core.split('.').map(|part| part.parse::<u64>().ok());
     let date = rest
         .strip_prefix("nightly.")

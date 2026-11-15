@@ -15,7 +15,7 @@ use input::{ToggleFullscreen, ToggleWindowFullscreen, WORKSPACE_CONTEXT};
 use router::{Destination, navigate};
 use state::{AppSettings, Cover, FullscreenControlsAutohide, Playback, Queue, SideTab, Sonora};
 use ui::{
-    ActiveTheme as _, Artwork, Button, Entrance, ExplicitBadge, Fading as _, GLASS_BLUR,
+    ActiveTheme as _, Artwork, Button, Entrance, ExplicitBadge, Fading as _, Flight, GLASS_BLUR,
     GLASS_FILL, InlineLink, InlineLinks, Motion, Motioned as _, Popup, Rising as _, Room,
     Scrollbar, Scrubber, ScrubberState, Springs, TabBar, Tails as _, Text, Visualizer, clock,
     entering, snapped,
@@ -23,7 +23,9 @@ use ui::{
 
 use crate::chrome::{Aside, TitleBarOptions};
 use crate::shared::menus::ItemMenu;
-use crate::shared::transport::{NOTCH, fraction, like, moved, percent, transport, volume_icon};
+use crate::shared::transport::{
+    COVER_FLIGHT, CoverFade, NOTCH, fraction, like, moved, percent, transport, volume_icon,
+};
 use crate::shared::visualizer::VisualizerDrive;
 use crate::shared::{self, ambient};
 use crate::shells::Shell;
@@ -94,6 +96,7 @@ pub struct FullscreenView {
     settings: Entity<AppSettings>,
     aside: Entity<Aside>,
     panel: Option<SideTab>,
+    on_show: bool,
     constellation: bool,
     constellation_clock: Option<Task<()>>,
     constellation_lyrics: super::constellation::LyricTimeline,
@@ -161,7 +164,7 @@ impl FullscreenView {
         })
         .detach();
         let panel = settings.read(cx).fullscreen_tab();
-        let shown = panel.unwrap_or(match settings.read(cx).lyrics_enabled() {
+        let shown = panel.unwrap_or_else(|| match settings.read(cx).lyrics_enabled() {
             true => SideTab::Lyrics,
             false => SideTab::Queue,
         });
@@ -176,6 +179,7 @@ impl FullscreenView {
             settings,
             aside,
             panel,
+            on_show: false,
             constellation: false,
             constellation_clock: None,
             constellation_lyrics: super::constellation::LyricTimeline::default(),
@@ -223,6 +227,7 @@ impl FullscreenView {
     /// Starts the idle clock as the view opens and stops it as the view closes, so it never
     /// hides the cursor over the workspace. Either way the view next shows with its controls up.
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        self.on_show = shown;
         if shown && self.constellation {
             self.load_constellation_timing(cx);
         }
@@ -542,8 +547,10 @@ impl FullscreenView {
         let revision = self.revision;
         let waiting = !local && album.is_some() && cover_large.is_none();
 
-        div()
+        let fade = cx.try_global::<CoverFade>().map_or(1., |fade| fade.0);
+        let cover = div()
             .id("fullscreen-artwork")
+            .when(fade < 1., |this| this.opacity(fade))
             .relative()
             .size(layout_side)
             .flex_none()
@@ -590,7 +597,14 @@ impl FullscreenView {
                                 )
                             }),
                     ),
-            )
+            );
+        Flight::new("fullscreen-cover", cover)
+            .transfer_spring(Springs::ARTWORK_FLIGHT)
+            .lands_from(COVER_FLIGHT)
+            .heads_to((!self.on_show).then_some(COVER_FLIGHT))
+            .follows(self.switch.is_some())
+            .reach((raster_side - layout_side) / 2. + pad)
+            .above()
     }
 
     fn open_context_menu(
@@ -1481,7 +1495,11 @@ impl Render for FullscreenView {
 
         let style = self.settings.read(cx).visualizer_style();
         let visualizer_on = !self.constellation
-            && self.panel.is_none()
+            && self
+                .settings
+                .read(cx)
+                .visualizer_screens()
+                .contains(self.panel)
             && style.shown()
             && self.playback.read(cx).steered(cx).is_none();
         let constellation_audio = self.constellation
@@ -1494,6 +1512,7 @@ impl Render for FullscreenView {
             Some(spectrum) => self.visualizer.show(cx.entity_id(), spectrum, window),
             None => self.visualizer.hide(),
         }
+        let visualizer_visible = !self.constellation && self.visualizer.presence() > 0.;
         let bottom = |bounds: Bounds<Pixels>| bounds.origin.y + bounds.size.height;
         // The peaks stop an inset short of the artist line, so the glow never reaches the text.
         let visualizer_max =
@@ -1548,7 +1567,7 @@ impl Render for FullscreenView {
                     .absolute()
                     .size_full(),
             )
-            .when(visualizer_on, |this| {
+            .when(visualizer_visible, |this| {
                 this.child(
                     Visualizer::new(self.visualizer.levels(), visualizer_max)
                         .style_kind(style)
@@ -1564,7 +1583,7 @@ impl Render for FullscreenView {
             // what is painted before it, so the bars stop reading through the transport while
             // the title and the artist line keep their own edges. The band fades with the
             // controls, so a hidden set takes it along.
-            .when(visualizer_on && shown && shared::effects(), |this| {
+            .when(visualizer_visible && shown && shared::effects(), |this| {
                 let band = viewport.height * VEIL;
                 this.child(
                     div()
