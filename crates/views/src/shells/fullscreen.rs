@@ -15,7 +15,7 @@ use input::{ToggleFullscreen, ToggleWindowFullscreen, WORKSPACE_CONTEXT};
 use router::{Destination, navigate};
 use state::{AppSettings, Cover, FullscreenControlsAutohide, Playback, Queue, SideTab, Sonora};
 use ui::{
-    ActiveTheme as _, Artwork, Button, Entrance, ExplicitBadge, Fading as _, Flight, GLASS_BLUR,
+    ActiveTheme as _, Artwork, Badge, Button, Entrance, Fading as _, Flight, GLASS_BLUR,
     GLASS_FILL, InlineLink, InlineLinks, Motion, Motioned as _, Popup, Rising as _, Room,
     Scrollbar, Scrubber, ScrubberState, Springs, TabBar, Tails as _, Text, Visualizer, clock,
     entering, snapped,
@@ -24,7 +24,8 @@ use ui::{
 use crate::chrome::{Aside, TitleBarOptions};
 use crate::shared::menus::ItemMenu;
 use crate::shared::transport::{
-    COVER_FLIGHT, CoverFade, NOTCH, fraction, like, moved, percent, transport, volume_icon,
+    COVER_FLIGHT, CoverFade, NOTCH, ShellSwap, fraction, like, moved, percent, transport,
+    volume_icon,
 };
 use crate::shared::visualizer::VisualizerDrive;
 use crate::shared::{self, ambient};
@@ -141,8 +142,17 @@ pub struct FullscreenView {
 }
 
 impl FullscreenView {
+    /// Gives fullscreen toasts room above the controls at the bottom.
+    pub(crate) fn dock_height(cx: &App) -> Pixels {
+        cx.theme().metrics.player_bar * DOCK_FULL
+    }
+
     pub fn new(playback: Entity<Playback>, queue: Entity<Queue>, cx: &mut Context<Self>) -> Self {
         cx.observe(&playback, |_, _, cx| cx.notify()).detach();
+        let ticks = playback.read(cx).ticks().clone();
+        cx.observe(&ticks, |_, _, cx| cx.notify()).detach();
+        let sponsorblock = Sonora::global(cx).sponsorblock.clone();
+        cx.observe(&sponsorblock, |_, _, cx| cx.notify()).detach();
         let cover = Sonora::global(cx).cover.clone();
         cx.observe(&cover, |_, _, cx| cx.notify()).detach();
         let lyrics = Sonora::global(cx).lyrics.clone();
@@ -269,6 +279,15 @@ impl FullscreenView {
             self.aside.update(cx, |aside, cx| aside.show(tab, cx));
         }
         self.stir(cx);
+    }
+
+    /// Toggles a fullscreen panel, leaving Constellation mode when a panel opens.
+    pub(crate) fn toggle_panel(&mut self, tab: SideTab, cx: &mut Context<Self>) {
+        if tab == SideTab::Lyrics && !self.settings.read(cx).lyrics_enabled() {
+            return;
+        }
+        let panel = (self.constellation || self.panel != Some(tab)).then_some(tab);
+        self.show(panel, cx);
     }
 
     fn show_constellation(&mut self, cx: &mut Context<Self>) {
@@ -918,6 +937,10 @@ impl FullscreenView {
                         .name(t!("song-position"))
                         .value(clock(elapsed))
                         .colors(filled, empty, theme.foreground)
+                        .ranges(
+                            Sonora::global(cx).sponsorblock.read(cx).ranges(cx),
+                            theme.foreground.opacity(0.4),
+                        )
                         .enabled(seekable)
                         .when_some(bubble, |this, (at, text)| this.bubble(at, text))
                         .on_move(cx.listener(|this, fraction: &f32, _, cx| {
@@ -1217,6 +1240,10 @@ impl FullscreenView {
                                 .name(t!("equalizer-status-volume"))
                                 .value(percent(level))
                                 .colors(theme.progress_bar, empty, theme.foreground)
+                                .ranges(
+                                    Sonora::global(cx).sponsorblock.read(cx).ranges(cx),
+                                    theme.foreground.opacity(0.4),
+                                )
                                 .lift(VOLUME_BUBBLE_LIFT)
                                 .when_some(bubble, |this, (at, text)| this.bubble(at, text))
                                 .on_move(cx.listener(|this, fraction: &f32, _, cx| {
@@ -1323,7 +1350,7 @@ impl FullscreenView {
         let theme = *cx.theme();
         let frosted = ambient::shown(cx);
 
-        div()
+        let leave = div()
             .id("leave-fullscreen-hover")
             .occlude()
             .absolute()
@@ -1348,7 +1375,12 @@ impl FullscreenView {
                     .on_click(|_, window, cx| {
                         window.dispatch_action(Box::new(ToggleFullscreen), cx)
                     }),
-            )
+            );
+        match cx.try_global::<ShellSwap>().copied().unwrap_or_default() {
+            ShellSwap::Opening => deferred(leave).into_any_element(),
+            ShellSwap::Closing => leave.invisible().into_any_element(),
+            ShellSwap::Settled => leave.into_any_element(),
+        }
     }
 }
 
@@ -1368,7 +1400,7 @@ fn album_name(track: &music::Track) -> SharedString {
 /// The explicit mark beside a title. `named` puts it in the accessibility tree, so the invisible
 /// copy that only balances the title row can stay out of it.
 fn explicit_badge(id: &'static str, named: bool) -> impl IntoElement {
-    let badge = div().flex_none().child(ExplicitBadge::new());
+    let badge = div().flex_none().child(Badge::explicit());
     match named {
         true => badge
             .id(id)
@@ -1671,6 +1703,10 @@ impl Render for FullscreenView {
                                         div().size_full().min_h_0().child(self.aside.clone()),
                                         switching,
                                     ))
+                                    .children(
+                                        self.aside
+                                            .update(cx, |aside, cx| aside.perches(window, cx)),
+                                    )
                                     .when(panel_hide < 1., |this| {
                                         this.child(self.floating(panel_hide, cx))
                                     }),

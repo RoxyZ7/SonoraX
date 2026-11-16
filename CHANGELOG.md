@@ -7,6 +7,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-11-16
+
+### Added
+
+- Find music from anywhere in the app with Powerbar and customize keyboard shortcuts.
+- Connect a Jellyfin music library and optionally control SonoraX from Jellyfin apps.
+- Find YouTube Music videos in search and on artist pages, and optionally skip marked segments with SponsorBlock.
+- Include local music in the library, open cover art in a zoomable viewer, and choose a provider on startup.
+- Show playback progress in the Windows taskbar and switch the player bar to time remaining.
+
+### Fixed
+
+- Let Windows use the selected audio output buffer instead of capping it at one period.
+- Show plain lyrics from external .lrc files and improve Subsonic lyrics support.
+- Reach Discord and Vesktop from the Linux Flatpak.
+
 ## [0.49.1] - 2026-11-15
 
 ### Added
@@ -90,6 +106,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to hardware, and picking one there keeps every other app off it.
 - Turn on Match sample rate in the sound settings to have a Direct to hardware device follow
   each track's own sample rate on Linux and macOS.
+- Genre pages on Subsonic and Navidrome show all of a genre's albums and songs along with credited
+  artists, not only the first 50 albums.
 - Swipe two fingers sideways on a touchpad to go back or forward a page.
 - A quick flick on a touchpad under Wayland keeps the page scrolling for a moment after your fingers lift.
 - An artist's page links to the songs of theirs you have in your Favorites, so you can see and play them together, and take one out with the X that appears when you point at it.
@@ -132,6 +150,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - YouTube Music no longer loses its refreshed sign-in cookies when several requests finish together.
 - On Windows, the hidden YouTube playback page no longer shares cookies with the sign-in window.
 - Local libraries no longer list macOS AppleDouble metadata files as songs.
+- YouTube Music playlists made before the account had a channel show up in Add to playlist and can be edited.
 - Text pasted on several lines, into a field or the Jam link, shows on one line instead of leaving the field blank.
 - On Windows, playback no longer crackles while you open apps or browser tabs.
 - Sonora no longer downloads every genre page at launch to find their pictures, so it uses far less memory with YouTube Music.
@@ -2634,7 +2653,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Initial release: a native Spotify client with playback, an interactive queue, the saved library,
 search, album, playlist, artist and song pages, context menus and adaptive theming.
 
-[unreleased]: https://github.com/sonorahq/sonora/compare/v0.49.1...HEAD
+[unreleased]: https://github.com/sonorahq/sonora/compare/v0.50.0...HEAD
+[0.50.0]: https://github.com/sonorahq/sonora/compare/v0.49.1...v0.50.0
 [0.49.1]: https://github.com/sonorahq/sonora/compare/v0.49.0...v0.49.1
 [0.49.0]: https://github.com/sonorahq/sonora/compare/v0.48.1...v0.49.0
 [0.48.1]: https://github.com/sonorahq/sonora/compare/v0.48.0...v0.48.1
