@@ -7,6 +7,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Clicking a song or other suggestion under the search page field opens it again instead of just closing the list.
 ### Added
 
 - Create Navidrome smart playlists and edit their rules from the playlists menu.
