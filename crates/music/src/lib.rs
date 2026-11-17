@@ -739,36 +739,6 @@ pub enum PlaybackEvent {
         id: String,
         track: TrackSignal,
     },
-    /// The queue window Soloist currently holds, in play order around the current track.
-    QueueChanged {
-        current: Option<connect::QueuedTrack>,
-        previous: Vec<connect::QueuedTrack>,
-        upcoming: Vec<connect::QueuedTrack>,
-    },
-    /// Soloist moved to a track another Spotify app queued.
-    QueuedTrack {
-        id: String,
-        at: Duration,
-    },
-    /// Soloist could not add this track to its shared queue.
-    QueueRejected {
-        id: String,
-        append: QueueAppend,
-    },
-    /// Soloist confirmed a track was added to its shared queue.
-    QueueAppended {
-        id: String,
-        append: QueueAppend,
-    },
-}
-
-/// Why Sonora added a track to a shared player queue.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QueueAppend {
-    /// The listener explicitly added a track to the queue.
-    User,
-    /// The tail of a collection Sonora is publishing to the shared queue.
-    Publication,
 }
 
 impl PlaybackEvent {
