@@ -26,6 +26,7 @@ use crate::shared::menus::ItemMenu;
 use crate::shared::transport::{
     COVER_FLIGHT, CoverFade, NOTCH, ShellSwap, fraction, like, moved, percent, transport,
     volume_icon,
+    clock_ems, end_clock,
 };
 use crate::shared::visualizer::VisualizerDrive;
 use crate::shared::{self, ambient};
@@ -912,19 +913,17 @@ impl FullscreenView {
         let seekable = playback.shown_track(cx).is_some();
         let (elapsed, total) = playback.shown_time(cx);
         let progress = self.pending.unwrap_or_else(|| fraction(elapsed, total));
-        let width = text
-            * match total.as_secs() >= 3600 {
-                true => CLOCK_LONG,
-                false => CLOCK_SHORT,
-            };
+        let time_left = self.settings.read(cx).player_bar_time_left();
+        let end = end_clock(elapsed, total, time_left);
+        let width = text * clock_ems(total, time_left);
 
         let bubble = self
             .over_seek
             .or(self.pending)
             .map(|at| (at, clock(total.mul_f32(at))));
 
-        let label = move |id: &'static str, value: Duration, align_end: bool| {
-            ui::spoken(id, clock(value))
+        let label = move |id: &'static str, value: SharedString, align_end: bool| {
+            ui::spoken(id, value)
                 .w(width)
                 .flex_none()
                 .whitespace_nowrap()
@@ -941,7 +940,7 @@ impl FullscreenView {
             .items_center()
             .gap_2()
             .w_full()
-            .child(label("fullscreen-elapsed", elapsed, true))
+            .child(label("fullscreen-elapsed", clock(elapsed), true))
             .child(
                 div().flex_1().min_w_0().child(
                     Scrubber::new(&self.seek, progress)
@@ -963,7 +962,10 @@ impl FullscreenView {
                         ),
                 ),
             )
-            .child(label("fullscreen-total", total, false))
+            .child(
+                label("fullscreen-total", end.text, false)
+                    .when_some(end.spoken, |this, spoken| this.aria_value(spoken)),
+            )
     }
 
     /// The pill, the seek bar and the transport row. Below `Room::Roomy` the row spans the
