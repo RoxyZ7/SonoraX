@@ -533,6 +533,7 @@ async fn engine_loop<F: Fetch>(
     let spawned = std::thread::Builder::new()
         .name(format!("{}-audio", fetch.name()))
         .spawn(move || {
+            crate::output::raise_decoder_priority();
             audio_loop(
                 audio_fetch,
                 job_rx,
