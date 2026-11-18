@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Apple Music songs matched from your own files show up in Library and play again after Apple pulls or stops streaming the catalog version they matched.
+- Two copies of one Apple Music song in your library stay separate songs instead of merging into one.
 ### Added
 
 - Click the tray icon on Linux to show Sonora's window, or to hide it into the tray when it is open.
