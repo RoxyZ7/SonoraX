@@ -802,6 +802,9 @@ pub trait Player: Send + Sync {
         true
     }
 
+    /// Takes back what `preload` lined up behind the current track, as when a change of repeat
+    /// altered what follows it. An engine that cannot is left as it is.
+    fn unline(&self) {}
     fn play(&self);
     fn pause(&self);
 

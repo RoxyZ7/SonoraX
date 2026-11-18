@@ -356,6 +356,10 @@ impl MusicPlayer for Official {
         Ok(())
     }
 
+    fn unline(&self) {
+        self.engine.line_down();
+    }
+
     fn play(&self) {
         self.engine.play();
     }
@@ -477,6 +481,10 @@ impl Engine {
     fn preload(&self, track_id: &str) -> Result<()> {
         self.player.preload(track_uri(track_id)?);
         Ok(())
+    }
+
+    fn unline(&self) {
+        self.engine.line_down();
     }
 
     fn play(&self) {
