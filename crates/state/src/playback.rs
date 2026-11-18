@@ -1076,6 +1076,9 @@ impl Playback {
         {
             return;
         }
+        // A gapless join only ever happens inside one engine; do not leave a stale line-up in
+        // the other engine when the queue moves from local files to a streaming service.
+        let segue = segue && music::is_local_id(id) == self.local_active();
         if self.preloaded.as_ref().is_some_and(|held| {
             (held.id == id && (held.segue || !segue))
                 || (self.crossfade != 0 && held.segue && !segue)
