@@ -7,6 +7,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Word-synced lyrics are shown ahead of line-synced ones by default again, whichever source has them. Turn Prioritize word-synced lyrics off in Lyrics sources to let the source order decide.
 ### Fixed
 
 - Your YouTube Music library lists every artist you follow, not only the first couple dozen.
