@@ -37,15 +37,15 @@
         assets = {
           x86_64-linux = {
             target = "x86_64-unknown-linux-gnu";
-            hash = "sha256-P5YP2TVFEEit9Asnwy8krX1HmngovdyhqAMsSgaCv5Q=";
+            hash = "sha256-PzuYJyWE2aPgxnf5E6EgCZGtby1UzYhBe8xBAqEBDko=";
           };
           aarch64-linux = {
             target = "aarch64-unknown-linux-gnu";
-            hash = "sha256-juuTCG8tqJocVIitauvRcYU8tMNyHhwoi+1X9iPMGZw=";
+            hash = "sha256-zBz7elLPovMs23zN8Ark/DBPo5xtgG3EagPvYT+wM5o=";
           };
           aarch64-darwin = {
             target = "macos";
-            hash = "sha256-/eDj/A+aeJlNnOYZ8sT2LboPcTx+rYr7gztp6d9utT8=";
+            hash = "sha256-Cj2OxZHOrKluKiyXGVglaEQ2ub2PkwfoMKQ/Mz5W/i0=";
           };
         };
       };
