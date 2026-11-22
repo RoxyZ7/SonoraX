@@ -483,10 +483,6 @@ impl Engine {
         Ok(())
     }
 
-    fn unline(&self) {
-        self.engine.line_down();
-    }
-
     fn play(&self) {
         self.player.play();
     }

@@ -5,7 +5,7 @@ use gpui::prelude::*;
 use gpui::{AnimationExt as _, App, Entity, Global, SharedString, div, svg};
 use i18n::t;
 use state::{Elsewhere, Playback, Repeat, Sonora};
-use ui::{ActiveTheme as _, Button, Motion, Side, clock};
+use ui::{ActiveTheme as _, Button, Motion, clock};
 
 use crate::shared::ambient;
 

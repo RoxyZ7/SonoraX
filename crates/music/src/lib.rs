@@ -795,16 +795,6 @@ pub trait Player: Send + Sync {
         None
     }
 
-    /// Adds a track to the engine's own shared queue. `false` keeps queue ownership local.
-    fn append_to_queue(&self, _track_id: &str, _append: QueueAppend) -> Result<bool> {
-        Ok(false)
-    }
-
-    /// Whether the engine can honour ordered local queue placements.
-    fn can_order_queue(&self) -> bool {
-        true
-    }
-
     /// Takes back what `preload` lined up behind the current track, as when a change of repeat
     /// altered what follows it. An engine that cannot is left as it is.
     fn unline(&self) {}

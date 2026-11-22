@@ -11,7 +11,7 @@ use state::Sonora;
 
 /// The name the window carries when nothing plays. It matches the title the window opens with,
 /// which is untranslated too.
-const APP_NAME: &str = "Sonora";
+const APP_NAME: &str = "SonoraX";
 
 /// Holds the playback watch for the open window. Installing again for another window drops the
 /// old watch, so only the window on screen gets retitled.
@@ -93,18 +93,18 @@ mod tests {
     #[test]
     fn a_playing_song_shows_its_title_and_artist_before_the_app_name() {
         let track = track("Blue Monday", "New Order");
-        assert_eq!(title(Some(&track)), "Blue Monday - New Order - Sonora");
+        assert_eq!(title(Some(&track)), "Blue Monday - New Order - SonoraX");
     }
 
     #[test]
     fn a_song_without_an_artist_shows_its_title_and_the_app_name() {
         let track = track("Blue Monday", "");
-        assert_eq!(title(Some(&track)), "Blue Monday - Sonora");
+        assert_eq!(title(Some(&track)), "Blue Monday - SonoraX");
     }
 
     #[test]
     fn nothing_playing_shows_the_app_name() {
-        assert_eq!(title(None), "Sonora");
+        assert_eq!(title(None), "SonoraX");
     }
 
     #[test]
@@ -115,12 +115,12 @@ mod tests {
 
         assert_eq!(
             last.change(Some(&first)).as_deref(),
-            Some("Blue Monday - New Order - Sonora"),
+            Some("Blue Monday - New Order - SonoraX"),
         );
         assert_eq!(last.change(Some(&first)), None);
         assert_eq!(
             last.change(Some(&second)).as_deref(),
-            Some("Dreams - Fleetwood Mac - Sonora"),
+            Some("Dreams - Fleetwood Mac - SonoraX"),
         );
     }
 
@@ -130,7 +130,7 @@ mod tests {
         let song = track("Blue Monday", "New Order");
 
         assert!(last.change(Some(&song)).is_some());
-        assert_eq!(last.change(None).as_deref(), Some("Sonora"));
+        assert_eq!(last.change(None).as_deref(), Some("SonoraX"));
         assert_eq!(last.change(None), None);
     }
 
@@ -143,7 +143,7 @@ mod tests {
         last.forget();
         assert_eq!(
             last.change(Some(&song)).as_deref(),
-            Some("Blue Monday - New Order - Sonora"),
+            Some("Blue Monday - New Order - SonoraX"),
         );
     }
 }

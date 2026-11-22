@@ -7,56 +7,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.50.3] - 2026-11-22
+
+### Added
+
+- Create Navidrome smart playlists and edit their rules in SonoraX.
+- Sort liked songs, albums and artists by the date they were liked.
+- See the playing song and artist in the Windows taskbar preview and Alt+Tab.
+- Choose a wider page layout, turn off taskbar progress, and show or hide the Linux window with a tray click.
+- Use the mouse side buttons to go back and forward on Windows.
+
 ### Changed
 
-- Word-synced lyrics are shown ahead of line-synced ones by default again, whichever source has them. Turn Prioritize word-synced lyrics off in Lyrics sources to let the source order decide.
-### Fixed
-
-- Your YouTube Music library lists every artist you follow, not only the first couple dozen.
-- A queue that mixes your own files with streaming songs plays the song it moves on to, instead of carrying on with an earlier local file while the player sits still.
-- Apple Music songs matched from your own files show up in Library and play again after Apple pulls or stops streaming the catalog version they matched.
-- Two copies of one Apple Music song in your library stay separate songs instead of merging into one.
-- YouTube Music says when Google is refusing your network, as it does for some VPN servers, instead of failing every track or signing you out.
-### Added
-
-- Click the tray icon on Linux to show Sonora's window, or to hide it into the tray when it is open.
-- Choose Wide under Settings, Appearance, Page width to let pages fill a large window again instead of staying centred.
-- Go back and forward with the side buttons of your mouse or a touchpad swipe on Windows.
+- Word-synced lyrics are prioritized by default, and the fullscreen player transitions with fewer visual layers.
 
 ### Fixed
 
-- Music keeps playing smoothly on Windows while another program keeps the processor busy, without raising Sonora's priority in Task Manager.
-- The fullscreen player counts down the time left when Show time left is on, as the player bar does.
-- Clicking a song or other suggestion under the search page field opens it again instead of just closing the list.
-- Your own YouTube Music playlists keep your name as their creator on the playlist page, as they do in your library.
-- Skipping songs in a Spotify album or playlist with Soloist plays the next song again, instead of a different one or a greyed-out next button.
-- Play Next and Play Last work again with Soloist.
-- Radio carries on with similar songs again after an album or playlist ends with Soloist.
-- Picking a Deezer Family profile at sign-in switches to it instead of failing and staying on the account owner.
-- Blur window stays available on Linux at 100% opacity, so a compositor that makes Sonora see-through, such as when it is unfocused, blurs the desktop behind it.
-- Soloist plays again after Sonora crashed, instead of the leftover Soloist blocking every song.
-- Repeat All goes back to the first song again with Soloist, instead of carrying on into other songs.
-### Added
-
-- Create Navidrome smart playlists and edit their rules from the playlists menu.
-- The quick search marks its first result as the one Enter acts on. Press Up off it, or Enter before results arrive, to open the search page for what you typed.
-- On Windows, the taskbar hover preview and Alt+Tab show the song and artist that are playing.
-- Turn off the playback progress shown on the Sonora taskbar button on Windows in Settings, to keep just the app icon.
-- Sort songs, albums and artists from Navidrome, Subsonic or your local files by the day you liked them, from the sort menu or the new Date liked column.
-
-### Fixed
-
-- The account menu no longer lists YouTube Music when you are signed in elsewhere and only used guest mode before. Guest mode shows there under its own name while you use it.
-- Clicking outside a text field takes the cursor out of it, so typing stops there.
-- The Cut, Copy, Paste and Select all menu of the quick search field is drawn at the usual size.
-- Moving through a track list with the arrow keys keeps the selected row above the player bar.
-- The cover no longer stutters as it flies into or out of the fullscreen player, most noticeably on Macs.
-- A local album shows the cover.jpg in its folder as its art, even when its first track has a different cover embedded.
-- Apple Music no longer lists an album whose songs were all removed from your library as a blank album with no artist or cover.
-- Long Opus and Ogg files from Navidrome, Subsonic or Jellyfin start playing right away instead of after the whole file has downloaded.
-- Sorting your Apple Music songs by Date added puts your latest additions first instead of ordering them by title.
-- Create a local playlist again while signed in to a streaming service, by picking Local files in the Create playlist dialog.
-- Creating a playlist on Apple Music no longer fails with an error when Apple leaves the new playlist out of its answer.
+- Apple Music library matches play using the correct catalog and library IDs; empty albums no longer appear.
+- YouTube Music reports blocked networks clearly and loads every followed artist.
+- Playback advances correctly between local files and streaming tracks, and Soloist repeat, queue and radio behavior is fixed.
+- Windows audio decoding stays responsive under load, and the fullscreen timer can show remaining time.
+- Deezer Family profile sign-in, local and Apple playlist creation, local cover art, and long Ogg playback work reliably.
+- Linux window blur remains available at full opacity.
+- The quick search field stays open while selecting a result, and the fullscreen cover animation is smoother.
 
 ## [0.50.0] - 2026-11-16
 
@@ -2704,8 +2677,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Initial release: a native Spotify client with playback, an interactive queue, the saved library,
 search, album, playlist, artist and song pages, context menus and adaptive theming.
 
-[unreleased]: https://github.com/sonorahq/sonora/compare/v0.50.0...HEAD
-[0.50.0]: https://github.com/sonorahq/sonora/compare/v0.49.1...v0.50.0
+[unreleased]: https://github.com/RoxyZ7/SonoraX/compare/v0.50.3...HEAD
+[0.50.3]: https://github.com/RoxyZ7/SonoraX/compare/v0.50.0...v0.50.3
+[0.50.0]: https://github.com/RoxyZ7/SonoraX/compare/v0.49.1...v0.50.0
 [0.49.1]: https://github.com/sonorahq/sonora/compare/v0.49.0...v0.49.1
 [0.49.0]: https://github.com/sonorahq/sonora/compare/v0.48.1...v0.49.0
 [0.48.1]: https://github.com/sonorahq/sonora/compare/v0.48.0...v0.48.1

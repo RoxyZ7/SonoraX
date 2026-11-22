@@ -33,7 +33,7 @@
         );
 
       release = {
-        version = "0.50.0";
+        version = "0.50.3";
         assets = {
           x86_64-linux = {
             target = "x86_64-unknown-linux-gnu";

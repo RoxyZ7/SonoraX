@@ -24,9 +24,8 @@ use ui::{
 use crate::chrome::{Aside, TitleBarOptions};
 use crate::shared::menus::ItemMenu;
 use crate::shared::transport::{
-    COVER_FLIGHT, CoverFade, NOTCH, ShellSwap, fraction, like, moved, percent, transport,
-    volume_icon,
-    clock_ems, end_clock,
+    COVER_FLIGHT, CoverFade, NOTCH, ShellSwap, clock_ems, end_clock, fraction, like, moved,
+    percent, transport, volume_icon,
 };
 use crate::shared::visualizer::VisualizerDrive;
 use crate::shared::{self, ambient};
@@ -57,8 +56,6 @@ const PILL_GAP: f32 = 2.;
 const SEEK_MAX: f32 = 420.;
 const VOLUME_RISE: f32 = 132.;
 const VOLUME_ZONE: f32 = 14.;
-const CLOCK_SHORT: f32 = 3.4;
-const CLOCK_LONG: f32 = 5.4;
 const VISUALIZER_MIN: f32 = 160.;
 /// How tall the band under the controls is, as a share of the window. It carries the seek bar,
 /// the transport and the meta line over a visualizer that reaches the bottom edge, so it runs
