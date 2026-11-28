@@ -607,11 +607,25 @@ impl Render for PlayerBar {
             .when_some(radius, |this, radius| this.rounded_b(radius))
             .when_else(
                 transparent,
-                |this| ui::bar_surface(this, cx).text_color(theme.popover_foreground),
-                |this| this.when(!theme.transparent, |this| this.bg(theme.secondary)),
+                |this| {
+                    ui::bar_surface(this, cx)
+                        .text_color(theme.popover_foreground)
+                        .border_t_1()
+                        .border_color(theme.foreground.opacity(0.14))
+                        .shadow(vec![gpui::BoxShadow {
+                            color: theme.background.opacity(0.28),
+                            offset: gpui::point(px(0.), px(-6.)),
+                            blur_radius: px(18.),
+                            spread_radius: px(0.),
+                            inset: false,
+                        }])
+                },
+                |this| {
+                    this.when(!theme.transparent, |this| this.bg(theme.secondary))
+                        .border_t_1()
+                        .border_color(theme.border)
+                },
             )
-            .border_t_1()
-            .border_color(theme.border)
             .occlude()
             .on_mouse_move(cx.listener(Self::hover));
 

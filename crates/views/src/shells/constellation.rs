@@ -17,77 +17,88 @@ use state::{Playback, Sonora};
 use ui::{ActiveTheme as _, Artwork, GLASS_BLUR, Theme};
 use unicode_segmentation::UnicodeSegmentation as _;
 
-const STAR_SCALES: [f32; 8] = [1.15, 0.75, 1.34, 0.90, 1.23, 0.82, 1.05, 0.70];
+const STAR_SCALES: [f32; 8] = [1.08, 0.88, 1.16, 0.94, 1.12, 0.86, 1.04, 0.90];
+const ANCHOR_GLOW_SCALE: f32 = 2.6;
+const ANCHOR_GLOW_OPACITY: f32 = 0.22;
+const ANCHOR_INNER_RATIO: f32 = 0.28;
+const HALO_STEPS: usize = 3;
+const HALO_POINTS: usize = 24;
+const FLARE_RING_POINTS: usize = 33;
 const GROUP_LIMIT: usize = 14;
-/// Each shape opens with a triangle and has room to build smaller faces inside it.
+
+/// Shapes expand organically from left-center toward the right, forming crisp interlocking triangles.
 const GROUP_SHAPES: [[(f32, f32); GROUP_LIMIT]; 3] = [
     [
-        (0.20, 0.70),
-        (0.30, 0.32),
-        (0.39, 0.53),
-        (0.40, 0.29),
-        (0.54, 0.64),
-        (0.62, 0.40),
-        (0.54, 0.18),
-        (0.71, 0.56),
-        (0.68, 0.75),
-        (0.52, 0.43),
-        (0.46, 0.81),
-        (0.32, 0.78),
-        (0.25, 0.49),
-        (0.49, 0.31),
+        (0.18, 0.54),
+        (0.27, 0.28),
+        (0.32, 0.64),
+        (0.41, 0.30),
+        (0.47, 0.58),
+        (0.56, 0.24),
+        (0.61, 0.56),
+        (0.71, 0.34),
+        (0.76, 0.66),
+        (0.84, 0.44),
+        (0.67, 0.77),
+        (0.49, 0.78),
+        (0.30, 0.78),
+        (0.52, 0.42),
     ],
     [
-        (0.32, 0.28),
-        (0.20, 0.53),
-        (0.39, 0.66),
-        (0.40, 0.40),
-        (0.50, 0.24),
-        (0.62, 0.43),
-        (0.55, 0.66),
-        (0.70, 0.76),
-        (0.75, 0.48),
-        (0.63, 0.25),
-        (0.54, 0.49),
-        (0.45, 0.80),
-        (0.29, 0.72),
-        (0.27, 0.44),
-    ],
-    [
-        (0.25, 0.48),
-        (0.35, 0.23),
-        (0.37, 0.63),
+        (0.22, 0.40),
+        (0.16, 0.66),
+        (0.35, 0.64),
+        (0.38, 0.32),
+        (0.51, 0.24),
+        (0.54, 0.58),
+        (0.66, 0.36),
+        (0.74, 0.64),
+        (0.84, 0.48),
+        (0.70, 0.22),
+        (0.60, 0.78),
+        (0.43, 0.79),
+        (0.26, 0.76),
         (0.47, 0.44),
-        (0.58, 0.67),
-        (0.66, 0.24),
-        (0.75, 0.50),
-        (0.64, 0.80),
-        (0.50, 0.20),
-        (0.57, 0.41),
-        (0.43, 0.76),
-        (0.29, 0.71),
-        (0.23, 0.34),
-        (0.48, 0.60),
+    ],
+    [
+        (0.24, 0.56),
+        (0.33, 0.26),
+        (0.42, 0.62),
+        (0.48, 0.34),
+        (0.58, 0.66),
+        (0.65, 0.28),
+        (0.75, 0.56),
+        (0.83, 0.36),
+        (0.70, 0.78),
+        (0.51, 0.78),
+        (0.31, 0.76),
+        (0.17, 0.42),
+        (0.56, 0.46),
+        (0.38, 0.44),
     ],
 ];
-const STAR_TRAIL_WIDTH: Pixels = px(7.);
-const CLOCK_BEVEL: Pixels = px(0.65);
+
+const STAR_TRAIL_WIDTH: Pixels = px(5.5);
+/// Compensates for audio output buffer + visual attack so lyrics land right on the vocal beat.
+const CONSTELLATION_LEAD: Duration = Duration::from_millis(60);
+const CLOCK_BEVEL: Pixels = px(0.75);
 const COVER_BLUR_FLOOR: f32 = 0.20;
-const WORD_GLOW: Pixels = px(9.);
-const PHRASE_FADE: Duration = Duration::from_millis(510);
-const HANDOFF_LEAD: Duration = Duration::from_millis(280);
-const HANDOFF_TAIL: Duration = Duration::from_millis(310);
-const SONG_HANDOFF_LEAD: Duration = Duration::from_millis(540);
-const SONG_HANDOFF_IMMEDIATE: Duration = Duration::from_millis(170);
+const FLARE_BEAMS: [(f32, f32, f32); 2] = [(1., 0.22, 0.34), (0.70, 0.065, 0.86)];
+const WORD_GLOW: Pixels = px(10.);
+const PHRASE_FADE: Duration = Duration::from_millis(420);
+const HANDOFF_LEAD: Duration = Duration::from_millis(210);
+const HANDOFF_TAIL: Duration = Duration::from_millis(240);
+const SONG_HANDOFF_LEAD: Duration = Duration::from_millis(480);
+const SONG_HANDOFF_IMMEDIATE: Duration = Duration::from_millis(160);
 const RESPONSE_LANES: usize = 3;
 const INSTRUMENTAL_GAP: Duration = Duration::from_millis(2400);
-const COVER_RETURN: Duration = Duration::from_millis(1150);
-const COVER_RELEASE: Duration = Duration::from_millis(720);
-const STAR_BLOOM: Duration = Duration::from_millis(420);
-const STAR_ATTACK: Duration = Duration::from_millis(80);
-const LINK_REVEAL: Duration = Duration::from_millis(210);
-const SONG_DISSOLVE: Duration = Duration::from_millis(920);
-const PALETTE_DISSOLVE: Duration = Duration::from_millis(620);
+const COVER_RETURN: Duration = Duration::from_millis(950);
+const COVER_RELEASE: Duration = Duration::from_millis(620);
+const STAR_BLOOM: Duration = Duration::from_millis(340);
+const STAR_ATTACK: Duration = Duration::from_millis(60);
+const LINK_REVEAL: Duration = Duration::from_millis(170);
+const SONG_DISSOLVE: Duration = Duration::from_millis(820);
+const PALETTE_DISSOLVE: Duration = Duration::from_millis(580);
 
 const FONT: &str = "Noto Sans";
 const THAI_FONT: &str = "Noto Sans Thai";
@@ -98,20 +109,20 @@ pub(super) fn glass_controls(element: Div, tint: Option<Hsla>, cx: &App) -> Div 
     let tint = tint.unwrap_or(dark.foreground);
     let blur = ui::blurring(cx);
     let rim = Hsla {
-        s: tint.s * 0.52,
-        l: 0.80,
+        s: tint.s * 0.40,
+        l: 0.86,
         ..tint
     };
     element
         .font_family(FONT)
-        .rounded(dark.radius * 2.)
+        .rounded(dark.radius * 2.2)
         .border_1()
-        .border_color(rim.opacity(0.32))
-        .when(blur, |this| this.backdrop_blur(GLASS_BLUR * 0.65))
+        .border_color(rim.opacity(0.30))
+        .when(blur, |this| this.backdrop_blur(GLASS_BLUR * 0.75))
         .bg(linear_gradient(
             168.,
-            linear_color_stop(rim.opacity(0.092), 0.),
-            linear_color_stop(dark.background.opacity(if blur { 0.24 } else { 0.38 }), 1.),
+            linear_color_stop(rim.opacity(0.11), 0.),
+            linear_color_stop(dark.background.opacity(if blur { 0.30 } else { 0.46 }), 1.),
         ))
 }
 
@@ -136,7 +147,7 @@ struct LyricNode {
 struct LyricGroup {
     nodes: Vec<LyricNode>,
     follows_break: bool,
-    links: [Option<usize>; GROUP_LIMIT],
+    links: [[Option<usize>; 2]; GROUP_LIMIT],
 }
 
 /// The art and title displayed at the end of a track, held while the next enters.
@@ -361,7 +372,7 @@ impl LyricTimeline {
             .replace(now)
             .map_or(0., |then| (now - then).as_secs_f32());
         if moving {
-            self.drift += elapsed.min(0.05) * 0.32;
+            self.drift += elapsed.min(0.05) * 0.28;
         }
         self.drift
     }
@@ -373,7 +384,7 @@ impl LyricTimeline {
         let target = (audio[0] * 0.76 + audio[1] * 0.24).clamp(0., 1.).sqrt();
         if let Some(elapsed) = elapsed.filter(|elapsed| *elapsed < Duration::from_secs(1)) {
             if playing {
-                let seconds = if target > self.energy { 0.37 } else { 0.85 };
+                let seconds = if target > self.energy { 0.30 } else { 0.75 };
                 self.energy +=
                     (target - self.energy) * (1. - (-elapsed.as_secs_f32() / seconds).exp());
             }
@@ -401,15 +412,24 @@ impl LyricSky {
         for (index, line) in lines.iter().enumerate() {
             let next = lines.get(index + 1).map(|next| next.start);
             for voice in &line.secondary {
-                let end = voice
-                    .sung_end()
-                    .filter(|end| *end > voice.start)
-                    .or_else(|| next.filter(|next| *next > voice.start))
-                    .unwrap_or(voice.start + Duration::from_secs(2));
+                let tokens = lyric_tokens(&voice.text);
+                let end = estimated_line_end(
+                    &voice.text,
+                    &tokens,
+                    voice.start,
+                    voice.sung_end(),
+                    next.filter(|next| *next > voice.start),
+                );
                 let nodes = timed_nodes(&voice.text, voice.words.as_deref(), voice.start, end);
-                if !nodes.is_empty() {
+                if let Some(first) = nodes.first() {
+                    let span_end = nodes
+                        .iter()
+                        .map(|node| node.end)
+                        .max()
+                        .unwrap_or(end)
+                        .max(first.start);
                     self.responses.push(LyricResponse {
-                        span: voice.start..end,
+                        span: first.start..span_end,
                         nodes,
                         lane: None,
                     });
@@ -419,32 +439,30 @@ impl LyricSky {
                 explicit_break = true;
                 continue;
             }
-            let end = line
-                .sung_end()
-                .filter(|end| *end > line.start)
-                // With line timestamps alone the next onset can include a long instrumental.
-                .or_else(|| {
-                    next.filter(|next| next.saturating_sub(line.start) >= Duration::from_secs(8))
-                        .map(|_| line.start.saturating_add(Duration::from_secs(4)))
-                })
-                .or(next)
-                .unwrap_or_else(|| line.start.saturating_add(Duration::from_secs(5)))
-                .min(next.unwrap_or(Duration::MAX));
-            let nodes = lyric_nodes(line, end);
+            let tokens = lyric_tokens(&line.text);
+            let end = estimated_line_end(&line.text, &tokens, line.start, line.sung_end(), next);
+            let nodes = timed_nodes(&line.text, line.words.as_deref(), line.start, end);
             if nodes.is_empty() {
                 continue;
             }
+            let vocal_start = nodes[0].start;
+            let vocal_end = nodes
+                .iter()
+                .map(|node| node.end)
+                .max()
+                .unwrap_or(end)
+                .max(vocal_start);
             let mut follows_break = self.vocals.last().is_none_or(|span| {
-                line.start.saturating_sub(span.end) >= INSTRUMENTAL_GAP
-                    || (explicit_break && line.start > span.end)
+                vocal_start.saturating_sub(span.end) >= INSTRUMENTAL_GAP
+                    || (explicit_break && vocal_start > span.end)
             });
             if follows_break {
-                self.vocals.push(line.start..end);
+                self.vocals.push(vocal_start..vocal_end);
             } else if let Some(span) = self.vocals.last_mut() {
-                span.end = span.end.max(end);
+                span.start = span.start.min(vocal_start);
+                span.end = span.end.max(vocal_end);
             }
             explicit_break = false;
-            // Prefer to start a new constellation at a line boundary.
             let mut new_group = starts_group
                 || follows_break
                 || self
@@ -456,7 +474,7 @@ impl LyricSky {
                     self.groups.push(LyricGroup {
                         nodes: Vec::new(),
                         follows_break,
-                        links: [None; GROUP_LIMIT],
+                        links: [[None; 2]; GROUP_LIMIT],
                     });
                     follows_break = false;
                 }
@@ -474,8 +492,11 @@ impl LyricSky {
                 occupied[lane] = response.span.end.saturating_add(RESPONSE_RELEASE);
             }
         }
-        for (index, group) in self.groups.iter_mut().enumerate() {
+        for group in &mut self.groups {
             group.nodes.sort_by_key(|node| node.start);
+        }
+        self.groups.sort_by_key(|group| group.nodes[0].start);
+        for (index, group) in self.groups.iter_mut().enumerate() {
             let points = &GROUP_SHAPES[index % GROUP_SHAPES.len()][..group.nodes.len()];
             for (end, link) in group
                 .links
@@ -484,10 +505,7 @@ impl LyricSky {
                 .take(points.len())
                 .skip(2)
             {
-                // Leave one opening every few points so the mesh has room to breathe.
-                if end == 2 || (end + index) % 4 != 0 {
-                    *link = cross_link(points, end);
-                }
+                *link = cross_links(points, end);
             }
         }
     }
@@ -563,10 +581,10 @@ pub(super) fn scene(
     let (playhead, playing) = playback.visual_position(cx);
     let (rem, viewport) = (window.rem_size(), window.viewport_size());
     let screen = point(viewport.width, viewport.height);
-    let width = viewport.width * 0.76;
-    let height = viewport.height * 0.59;
+    let width = viewport.width * 0.84;
+    let height = viewport.height * 0.48;
     let size = point(width, height);
-    let clock = (viewport.height * 0.16).clamp(rem * 2.1, rem * 7.8);
+    let clock = (viewport.height * 0.145).clamp(rem * 2.1, rem * 7.2);
     let album_side = (viewport.height * 0.30).min(rem * 15.);
 
     timeline.follow_song(
@@ -592,11 +610,12 @@ pub(super) fn scene(
         timeline.exit = None;
     }
     let (lyric_time, source) = scene_lyrics(track.as_ref(), playhead, cx);
+    let lyric_time = lyric_time.map(|at| at.saturating_add(CONSTELLATION_LEAD));
     timeline.sky.update(source);
     let incoming_lyrics = crossfade.and_then(|(track, fade)| {
         let (at, source) = scene_lyrics(Some(track), fade.incoming, cx);
         timeline.incoming_sky.update(source);
-        at
+        at.map(|at| at.saturating_add(CONSTELLATION_LEAD))
     });
 
     let moving = playing && motion;
@@ -623,7 +642,6 @@ pub(super) fn scene(
     let (current_colors, palette_moving) =
         LyricTimeline::follow_colors(&mut timeline.palette, target, frame_now, motion);
     let change = crossfade.map_or(1., |(_, fade)| fade.progress);
-    // Follow the audio fade closely while softening the first and last few frames.
     let blend = change * change * (3. - 2. * change);
     let (incoming_colors, incoming_colors_moving) = if let Some((track, _)) = crossfade {
         let (palette, contrast) = cover_colors(incoming_art.as_ref(), Some(track), screen, cx);
@@ -670,8 +688,8 @@ pub(super) fn scene(
     let change = exit.map_or(change, |exit| {
         progress(frame_now - exit.started, SONG_DISSOLVE)
     });
-    let arrival = ui::ease_out_cubic(((change - 0.13) / 0.87).clamp(0., 1.));
-    let departure = 1. - ui::ease_in_out_cubic((change / 0.63).min(1.));
+    let arrival = ui::ease_out_cubic(((change - 0.08) / 0.92).clamp(0., 1.));
+    let departure = 1. - ui::ease_in_out_cubic((change / 0.78).min(1.));
     let primary_opacity = if crossfade.is_some() {
         1. - blend
     } else {
@@ -682,6 +700,7 @@ pub(super) fn scene(
         rim_position + (song_progress(fade.incoming, track.duration) - rim_position) * blend
     });
     if moving
+        || (playing && (lyric_time.is_some() || incoming_lyrics.is_some()))
         || palette_moving
         || incoming_colors_moving
         || exit.is_some()
@@ -726,8 +745,8 @@ pub(super) fn scene(
         .when_some(lookahead.and_then(|art| art.cover), |this, cover| {
             this.child(ui::Prefetch::new([
                 Artwork::new(Some(cover.clone()))
-                    .size(screen.x * 1.15)
-                    .wide(screen.y * 1.15)
+                    .size(screen.x * 1.12)
+                    .wide(screen.y * 1.12)
                     .into_any_element(),
                 Artwork::new(Some(cover))
                     .size(album_side)
@@ -833,25 +852,25 @@ pub(super) fn scene(
                 .absolute()
                 .left_0()
                 .right_0()
-                .top(viewport.height * 0.075)
+                .top(viewport.height * 0.055)
                 .flex()
                 .flex_col()
                 .items_center()
                 .text_color(dark.foreground)
                 .child(
                     div()
-                        .text_size(rem * 0.82)
+                        .text_size(rem * 0.92)
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(
-                            ui::motion::mix(dark.foreground, clock_colors[0], 0.14).opacity(0.58),
+                            ui::motion::mix(dark.foreground, clock_colors[0], 0.08).opacity(0.84),
                         )
                         .text_shadow(clock_reflections(
                             dark.foreground,
                             dark.background,
                             clock_colors[0],
-                            0.55 + clock_contrast * 0.45,
+                            0.72 + clock_contrast * 0.28,
                         ))
-                        .child(now.strftime("%d / %m / %Y").to_string()),
+                        .child(now.strftime("%a %d %b").to_string()),
                 )
                 .child(glass_clock(
                     now.strftime("%H:%M").to_string(),
@@ -873,7 +892,7 @@ pub(super) fn scene(
                         .absolute()
                         .left((viewport.width - width) / 2.)
                         .top(
-                            (viewport.height - height) / 2. + viewport.height * 0.05
+                            (viewport.height - height) / 2. + viewport.height * 0.11
                                 - rem * (1. - departure) * 0.75,
                         )
                         .w(width)
@@ -938,7 +957,7 @@ pub(super) fn scene(
                 AlbumReveal {
                     focus: cover_focus,
                     opacity: primary_opacity,
-                    lift: rem * (1. - arrival) * 1.7,
+                    lift: rem * (1. - arrival) * 1.5,
                     pulse: energy * cover_focus,
                     reflection: drift.sin() * 16. + (1. - arrival) * 38.,
                 },
@@ -987,7 +1006,7 @@ fn sky_layer(size: Point<Pixels>, screen: Point<Pixels>) -> Div {
     div()
         .absolute()
         .left((screen.x - size.x) / 2.)
-        .top((screen.y - size.y) / 2. + screen.y * 0.05)
+        .top((screen.y - size.y) / 2. + screen.y * 0.11)
         .w(size.x)
         .h(size.y)
 }
@@ -1114,13 +1133,13 @@ impl LyricResponse {
             f32::from(at < self.span.end)
         };
         let light = frame.light;
-        let tint = ui::motion::mix(light.secondary, light.foreground, 0.5);
+        let tint = ui::motion::mix(light.secondary, light.foreground, 0.72);
         let first = active.saturating_sub(3);
         let last = self.nodes.len().min(active + 3);
         let visible = last - first;
         let step = (frame.size.x * 0.46 / visible as f32).min(frame.rem * 4.4);
         let shift = frame.size.x * 0.16;
-        let top = frame.size.y * 0.81 + frame.rem * (row as f32 * 2.15);
+        let top = frame.size.y * 0.84 + frame.rem * (row as f32 * 2.15);
         let entry = if frame.motion {
             ui::ease_out_cubic(progress(at.saturating_sub(self.span.start), STAR_ATTACK))
         } else {
@@ -1140,7 +1159,7 @@ impl LyricResponse {
                 for index in first..active.min(last - 1) {
                     stroke(
                         &[point(x(index), y), point(x(index + 1), y)],
-                        tint.opacity(0.31),
+                        tint.opacity(0.38),
                         window,
                     );
                 }
@@ -1153,13 +1172,13 @@ impl LyricResponse {
                     let strength = 1. - sweep.settle;
                     line(
                         &[point(tail, y), point(head, y)],
-                        frame.rem * 0.18,
-                        tint.opacity(strength * 0.18),
+                        frame.rem * 0.16,
+                        tint.opacity(strength * 0.22),
                         window,
                     );
                     stroke(
                         &[point(tail, y), point(head, y)],
-                        tint.opacity(strength * 0.82),
+                        light.foreground.opacity(strength * 0.88),
                         window,
                     );
                 }
@@ -1182,7 +1201,7 @@ impl LyricResponse {
             .top(top + frame.rem * (1. - entry) * 0.36)
             .flex()
             .justify_center()
-            .opacity(release * (0.6 + 0.28 * entry))
+            .opacity(release * (0.68 + 0.26 * entry))
             .child(
                 div()
                     .relative()
@@ -1210,11 +1229,27 @@ impl LyricResponse {
                                     .w(step)
                                     .gap_y_1()
                                     .opacity(if current {
-                                        1.
+                                        if frame.motion {
+                                            0.35 + 0.65
+                                                * ui::ease_out_cubic(progress(
+                                                    at.saturating_sub(node.start),
+                                                    Duration::from_millis(90),
+                                                ))
+                                        } else {
+                                            1.
+                                        }
                                     } else if index < active {
-                                        0.48
+                                        if frame.motion {
+                                            1. - 0.42
+                                                * ui::ease_out_cubic(progress(
+                                                    at.saturating_sub(node.end),
+                                                    Duration::from_millis(160),
+                                                ))
+                                        } else {
+                                            0.58
+                                        }
                                     } else {
-                                        0.28
+                                        0.32
                                     })
                                     .child(
                                         div()
@@ -1222,12 +1257,14 @@ impl LyricResponse {
                                             .flex()
                                             .items_center()
                                             .justify_center()
-                                            .text_size(frame.rem * (0.56 + 0.20 * bloom))
-                                            .text_color(tint)
-                                            .text_shadow(lyric_shadows(
-                                                Theme::dark().background,
-                                                tint,
-                                            ))
+                                            .text_size(frame.rem * (0.56 + 0.22 * bloom))
+                                            .text_color(light.foreground)
+                                            .when(current, |this| {
+                                                this.text_shadow(lyric_shadows(
+                                                    Theme::dark().background,
+                                                    tint,
+                                                ))
+                                            })
                                             .child(if current { "✦" } else { "·" }),
                                     )
                                     .child(
@@ -1236,9 +1273,10 @@ impl LyricResponse {
                                             .max_w_full()
                                             .truncate()
                                             .text_size(
-                                                frame.rem * if current { 1.11 } else { 0.87 },
+                                                frame.rem * if current { 1.12 } else { 0.86 },
                                             )
                                             .text_color(color)
+                                            .text_shadow(trail_shadows(Theme::dark().background))
                                             .child(node.text.clone()),
                                     )
                             }),
@@ -1282,12 +1320,12 @@ fn cover_colors(
         .or_else(|| ui::cover_palette(track?.cover.as_deref()?, cx));
     let brightness = palette.map_or(0., |palette| {
         let aspect = f32::from(screen.x) / f32::from(screen.y).max(1.);
-        let y = (0.15 + 0.075) / 1.15;
+        let y = (0.15 + 0.055) / 1.08;
         palette.cover_brightness_at(aspect, y)
     });
     (
         palette,
-        ui::ease_in_out_cubic(((brightness - 0.32) / 0.47).clamp(0., 1.)),
+        ui::ease_in_out_cubic(((brightness - 0.30) / 0.45).clamp(0., 1.)),
     )
 }
 
@@ -1319,7 +1357,7 @@ fn scene_colors(
         .and_then(|palette| palette.secondary)
         .unwrap_or_else(|| Hsla {
             h: (first.h + 0.085).rem_euclid(1.),
-            l: (first.l + 0.12).min(1.),
+            l: (first.l + 0.14).min(1.),
             ..first
         });
     SceneColors {
@@ -1341,6 +1379,7 @@ fn scene_colors(
     }
 }
 
+/// Crystal-sharp vivid artwork while lyrics are playing; smoothly blurs out during breaks.
 fn cover_backdrop(
     cover: SharedString,
     id: &'static str,
@@ -1350,7 +1389,7 @@ fn cover_backdrop(
     opacity: f32,
     effects: bool,
 ) -> Div {
-    let blur = GLASS_BLUR * 2. * (COVER_BLUR_FLOOR + (1. - COVER_BLUR_FLOOR) * focus);
+    let blur = GLASS_BLUR * 1.4 * (COVER_BLUR_FLOOR + (1. - COVER_BLUR_FLOOR) * focus);
     div()
         .absolute()
         .left(-screen.x * (0.075 + drift.sin() * 0.045))
@@ -1394,7 +1433,7 @@ fn album_card(
         .absolute()
         .left_0()
         .right_0()
-        .top(screen.y * 0.33 - rem * (1. - reveal.focus) + reveal.lift)
+        .top(screen.y * 0.34 - rem * (1. - reveal.focus) + reveal.lift)
         .opacity(reveal.focus * reveal.opacity)
         .flex()
         .flex_col()
@@ -1421,10 +1460,10 @@ fn album_card(
                             .inset_0()
                             .rounded(corner)
                             .border_1()
-                            .border_color(dark.foreground.opacity(0.22))
+                            .border_color(dark.foreground.opacity(0.24))
                             .bg(linear_gradient(
                                 143. + reveal.reflection,
-                                linear_color_stop(dark.foreground.opacity(0.17), 0.),
+                                linear_color_stop(dark.foreground.opacity(0.18), 0.),
                                 linear_color_stop(tint.opacity(0.02), 0.75),
                             )),
                     ),
@@ -1434,15 +1473,120 @@ fn album_card(
             div()
                 .text_center()
                 .font_family(lyric_font(&art.title))
-                .text_size(rem * 0.9)
-                .text_color(dark.foreground.opacity(0.75))
+                .text_size(rem * 0.92)
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(dark.foreground.opacity(0.86))
+                .text_shadow(trail_shadows(dark.background))
                 .child(art.title.clone()),
         )
 }
 
-/// Use supplied timings, or estimate the onsets within a synced line.
-fn lyric_nodes(line: &LyricsLine, end: Duration) -> Vec<LyricNode> {
-    timed_nodes(&line.text, line.words.as_deref(), line.start, end)
+fn spoken_units(text: &str) -> f64 {
+    let mut units = 0.0_f64;
+    for grapheme in text.graphemes(true) {
+        let Some(first) = grapheme.chars().next() else {
+            continue;
+        };
+        if !first.is_alphanumeric() {
+            continue;
+        }
+        let step = match first {
+            '\u{0e30}' | '\u{0e32}' | '\u{0e33}' | '\u{0e40}'..='\u{0e46}' => 0.35,
+            _ => 1.0,
+        };
+        units += step;
+    }
+    units
+}
+
+fn spoken_weight(text: &str) -> f64 {
+    let units = spoken_units(text);
+    if units <= 0.0 {
+        return 1.0;
+    }
+    0.55 + units.powf(0.60)
+}
+
+fn max_spoken_duration(text: &str, tokens: &[Range<usize>]) -> Duration {
+    let total_weight: f64 = tokens
+        .iter()
+        .map(|token| spoken_weight(&text[token.clone()]))
+        .sum();
+    let secs = (0.9 + total_weight * 0.34).clamp(1.6, 12.0);
+    Duration::from_secs_f64(secs)
+}
+
+fn estimated_line_end(
+    text: &str,
+    tokens: &[Range<usize>],
+    start: Duration,
+    sung_end: Option<Duration>,
+    next: Option<Duration>,
+) -> Duration {
+    if let Some(end) = sung_end.filter(|end| *end > start) {
+        return end;
+    }
+    let max_span = max_spoken_duration(text, tokens);
+    let Some(next) = next.filter(|next| *next > start) else {
+        return start.saturating_add(max_span);
+    };
+    let gap = next.saturating_sub(start);
+    if gap > max_span {
+        return start.saturating_add(max_span);
+    }
+    let breath = if gap > Duration::from_millis(600) {
+        (gap / 10).min(Duration::from_millis(200))
+    } else {
+        Duration::ZERO
+    };
+    start.saturating_add(gap.saturating_sub(breath))
+}
+
+struct SanitizedWord<'a> {
+    text: &'a str,
+    start: Duration,
+    end: Duration,
+    interp_end: Duration,
+}
+
+fn sanitize_words<'a>(
+    words: &'a [music::LyricsWord],
+    line_end: Duration,
+) -> Vec<SanitizedWord<'a>> {
+    let filtered: Vec<_> = words
+        .iter()
+        .filter_map(|word| {
+            let trimmed = word.text.trim();
+            (!trimmed.is_empty()).then_some((trimmed, word.start, word.end))
+        })
+        .collect();
+    let mut prev_start = Duration::ZERO;
+    let mut out = Vec::with_capacity(filtered.len());
+    for (index, &(text, raw_start, raw_end)) in filtered.iter().enumerate() {
+        let start = raw_start.max(prev_start);
+        prev_start = start;
+        let next_start = filtered.get(index + 1).map(|&(_, next, _)| next);
+        let (end, interp_end) = if raw_end > start {
+            let interp = next_start
+                .filter(|next| *next > start)
+                .map_or(raw_end, |next| raw_end.min(next));
+            (raw_end, interp)
+        } else {
+            let inferred = next_start
+                .filter(|next| *next > start)
+                .unwrap_or_else(|| line_end.max(start));
+            let max_span = max_spoken_duration(text, &lyric_tokens(text));
+            let interp = inferred.min(start.saturating_add(max_span));
+            (inferred, interp)
+        };
+        out.push(SanitizedWord {
+            text,
+            start,
+            end,
+            interp_end,
+        });
+    }
+    out
 }
 
 fn timed_nodes(
@@ -1453,21 +1597,30 @@ fn timed_nodes(
 ) -> Vec<LyricNode> {
     let tokens = lyric_tokens(text);
     if let Some(words) = words {
-        if let Some(nodes) = join_timed_fragments(text, from, &tokens, words, end) {
-            return nodes;
-        }
-        let nodes: Vec<_> = words
-            .iter()
-            .filter(|word| !word.text.trim().is_empty())
-            .flat_map(|word| {
-                let start = word.start.clamp(from, end.max(from));
-                let finish = word.end.clamp(start, end.max(start));
-                let text = word.text.trim();
-                estimated_nodes(text, &lyric_tokens(text), start, finish)
-            })
-            .collect();
-        if !nodes.is_empty() {
-            return nodes;
+        let sanitized = sanitize_words(words, end);
+        if !sanitized.is_empty() {
+            if let Some(nodes) = join_timed_fragments(text, &tokens, &sanitized) {
+                return nodes;
+            }
+            let nodes: Vec<_> = sanitized
+                .iter()
+                .flat_map(|word| {
+                    let sub_tokens = lyric_tokens(word.text);
+                    if sub_tokens.len() <= 1 {
+                        vec![lyric_node(word.text, word.start, word.end)]
+                    } else {
+                        let mut sub =
+                            estimated_nodes(word.text, &sub_tokens, word.start, word.interp_end);
+                        if let Some(last) = sub.last_mut() {
+                            last.end = last.end.max(word.end);
+                        }
+                        sub
+                    }
+                })
+                .collect();
+            if !nodes.is_empty() {
+                return nodes;
+            }
         }
     }
     estimated_nodes(text, &tokens, from, end)
@@ -1512,24 +1665,24 @@ fn estimated_nodes(
     start: Duration,
     end: Duration,
 ) -> Vec<LyricNode> {
-    let weight = |token: &Range<usize>| {
-        text[token.clone()]
-            .graphemes(true)
-            .count()
-            .clamp(1, 9)
-            .isqrt()
-    };
-    let total: usize = tokens.iter().map(weight).sum();
+    if tokens.is_empty() {
+        return Vec::new();
+    }
+    let weights: Vec<f64> = tokens
+        .iter()
+        .map(|token| spoken_weight(&text[token.clone()]))
+        .collect();
+    let total: f64 = weights.iter().sum();
     let span = end.saturating_sub(start);
-    let lead = (span / (total.max(1) as u32 * 4)).min(Duration::from_millis(100));
-    let mut elapsed = 0;
+    let mut elapsed = 0.0;
     tokens
         .iter()
-        .map(|token| {
-            let offset = span.mul_f64(elapsed as f64 / total as f64);
-            elapsed += weight(token);
-            let onset = start + offset.saturating_sub(lead);
-            lyric_node(&text[token.clone()], onset, onset)
+        .zip(weights)
+        .map(|(token, weight)| {
+            let onset = start + span.mul_f64((elapsed / total).clamp(0.0, 1.0));
+            elapsed += weight;
+            let finish = start + span.mul_f64((elapsed / total).clamp(0.0, 1.0));
+            lyric_node(&text[token.clone()], onset, finish)
         })
         .collect()
 }
@@ -1543,74 +1696,144 @@ fn lyric_node(text: &str, start: Duration, end: Duration) -> LyricNode {
     }
 }
 
-/// Some providers time syllables. Match them against the displayed line so a
-/// node uses the first timed fragment of a word. A timestamp covering several
-/// written words only gives an interval, so interpolate within that fragment.
+fn find_fragment(haystack: &str, cursor: usize, fragment: &str) -> Option<(usize, usize)> {
+    let rest = haystack.get(cursor..)?;
+    if let Some(offset) = rest.find(fragment) {
+        return Some((cursor + offset, cursor + offset + fragment.len()));
+    }
+    let frag_lower = fragment.to_lowercase();
+    for (byte_idx, _) in rest.char_indices() {
+        let slice = &rest[byte_idx..];
+        let mut chars = slice.char_indices();
+        let mut matched = String::new();
+        while matched.len() < frag_lower.len() {
+            let Some((_, ch)) = chars.next() else {
+                break;
+            };
+            for lc in ch.to_lowercase() {
+                matched.push(lc);
+            }
+        }
+        if matched == frag_lower {
+            let end_offset = chars.next().map_or(slice.len(), |(i, _)| i);
+            return Some((cursor + byte_idx, cursor + byte_idx + end_offset));
+        }
+    }
+    None
+}
+
+fn weighted_position(
+    text: &str,
+    range: &Range<usize>,
+    from: Duration,
+    to: Duration,
+    at: usize,
+) -> Duration {
+    let at = at.clamp(range.start, range.end);
+    if at <= range.start || to <= from {
+        return from;
+    }
+    if at >= range.end {
+        return to;
+    }
+    let total = spoken_units(&text[range.clone()]);
+    if total <= 0.0 {
+        return from;
+    }
+    let before = spoken_units(&text[range.start..at]);
+    from + to
+        .saturating_sub(from)
+        .mul_f64((before / total).clamp(0.0, 1.0))
+}
+
+struct TimedSpan {
+    range: Range<usize>,
+    from: Duration,
+    to: Duration,
+    interp_to: Duration,
+}
+
 fn join_timed_fragments(
     text: &str,
-    from: Duration,
     tokens: &[Range<usize>],
-    words: &[music::LyricsWord],
-    end: Duration,
+    words: &[SanitizedWord<'_>],
 ) -> Option<Vec<LyricNode>> {
     let mut cursor = 0;
     let mut spans = Vec::with_capacity(words.len());
     for word in words {
-        let fragment = word.text.trim();
-        if fragment.is_empty() {
-            continue;
-        }
-        let start = cursor + text.get(cursor..)?.find(fragment)?;
-        cursor = start + fragment.len();
-        let at = word.start.clamp(from, end.max(from));
-        spans.push((start..cursor, at, word.end.clamp(at, end.max(at))));
+        let (start, end) = find_fragment(text, cursor, word.text)?;
+        cursor = end;
+        spans.push(TimedSpan {
+            range: start..end,
+            from: word.start,
+            to: word.end,
+            interp_to: word.interp_end,
+        });
     }
     let mut nodes = Vec::with_capacity(tokens.len());
     let mut remaining = spans.as_slice();
     for token in tokens {
-        remaining =
-            &remaining[remaining.partition_point(|(range, _, _)| range.end <= token.start)..];
-        let (range, from, _) = remaining.first()?;
-        if range.start >= token.end {
+        remaining = &remaining[remaining.partition_point(|span| span.range.end <= token.start)..];
+        let first = remaining.first()?;
+        if first.range.start >= token.end {
             return None;
         }
-        let position = |range: &Range<usize>, from: Duration, to: Duration, at: usize| {
-            let fragment = &text[range.clone()];
-            let before = text[range.start..at.clamp(range.start, range.end)]
-                .graphemes(true)
-                .count();
-            from + to
-                .saturating_sub(from)
-                .mul_f64(before as f64 / fragment.graphemes(true).count() as f64)
+        let start = if token.start <= first.range.start {
+            first.from
+        } else {
+            weighted_position(text, &first.range, first.from, first.interp_to, token.start)
         };
-        let start = position(range, *from, remaining[0].2, token.start);
         let finish = remaining
             .iter()
-            .take_while(|(range, _, _)| range.start < token.end)
-            .map(|(range, from, to)| position(range, *from, *to, token.end))
+            .take_while(|span| span.range.start < token.end)
+            .map(|span| {
+                if token.end >= span.range.end {
+                    span.to
+                } else {
+                    weighted_position(text, &span.range, span.from, span.interp_to, token.end)
+                }
+            })
             .max()?;
         nodes.push(lyric_node(&text[token.clone()], start, finish));
     }
     (!nodes.is_empty()).then_some(nodes)
 }
 
-/// Close a face with a nearby earlier star, leaving very shallow triangles open.
-fn cross_link(points: &[(f32, f32)], end: usize) -> Option<usize> {
+/// Connect up to two nearby earlier stars with good angular separation to build crisp triangles.
+fn cross_links(points: &[(f32, f32)], end: usize) -> [Option<usize>; 2] {
     let (x, y) = points[end];
-    let (previous_x, previous_y) = points[end - 1];
-    let incoming = (previous_x - x, previous_y - y);
-    let incoming_length = incoming.0.hypot(incoming.1);
-    (end.saturating_sub(5)..end - 1)
+    let (prev_x, prev_y) = points[end - 1];
+    let incoming = (prev_x - x, prev_y - y);
+    let incoming_len = incoming.0.hypot(incoming.1).max(0.001);
+
+    let mut candidates: Vec<(usize, f32, (f32, f32))> = (end.saturating_sub(6)..end - 1)
         .filter_map(|start| {
-            let (start_x, start_y) = points[start];
-            let branch = (start_x - x, start_y - y);
-            let length = branch.0.hypot(branch.1);
-            let angle =
-                (incoming.0 * branch.1 - incoming.1 * branch.0).abs() / (incoming_length * length);
-            (length >= 0.12 && angle >= 0.30).then_some((start, length / angle.sqrt()))
+            let (sx, sy) = points[start];
+            let branch = (sx - x, sy - y);
+            let len = branch.0.hypot(branch.1);
+            let sin_angle =
+                (incoming.0 * branch.1 - incoming.1 * branch.0).abs() / (incoming_len * len);
+            (len >= 0.11 && len <= 0.42 && sin_angle >= 0.28).then_some((
+                start,
+                len / sin_angle.sqrt(),
+                (branch.0 / len, branch.1 / len),
+            ))
         })
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(start, _)| start)
+        .collect();
+    candidates.sort_by(|a, b| a.1.total_cmp(&b.1));
+
+    let first = candidates.first().copied();
+    let second = first.and_then(|(_, _, dir1)| {
+        candidates
+            .iter()
+            .skip(1)
+            .find(|(_, _, dir2)| (dir1.0 * dir2.1 - dir1.1 * dir2.0).abs() >= 0.26)
+            .copied()
+    });
+    [
+        first.map(|(start, _, _)| start),
+        second.map(|(start, _, _)| start),
+    ]
 }
 
 #[derive(Clone, Copy)]
@@ -1621,15 +1844,14 @@ struct EdgeSweep {
 }
 
 fn edge_sweep(nodes: &[LyricNode], active: usize, at: Duration) -> Option<EdgeSweep> {
-    // Reach the target on the lyric onset, then leave a short tail behind the new star.
     [active, active + 1]
         .into_iter()
         .filter_map(|target| {
             let previous = nodes.get(target.checked_sub(1)?)?.start;
             let onset = nodes.get(target)?.start;
             let gap = onset.saturating_sub(previous);
-            let lead = (gap / 2).min(Duration::from_millis(205));
-            let settle = (gap / 4).min(Duration::from_millis(105));
+            let lead = (gap / 2).min(Duration::from_millis(145));
+            let settle = (gap / 4).min(Duration::from_millis(85));
             if lead.is_zero() || settle.is_zero() {
                 return None;
             }
@@ -1647,7 +1869,7 @@ fn edge_sweep(nodes: &[LyricNode], active: usize, at: Duration) -> Option<EdgeSw
         .next_back()
 }
 
-/// Shares the rim's cover palette with the stars while retaining a readable core.
+/// Shares the rim's cover palette with the stars while keeping crisp pure-white geometry.
 #[derive(Clone, Copy)]
 struct StarLight {
     primary: Hsla,
@@ -1656,7 +1878,6 @@ struct StarLight {
 }
 
 impl StarLight {
-    /// Alternate occasional secondary stars and use the other hue for their reflections.
     fn node(self, shape: usize, index: usize) -> (Hsla, Hsla) {
         if (shape % 3 + index) % 3 == 2 {
             (self.secondary, self.primary)
@@ -1681,7 +1902,7 @@ struct GraphMotion {
     energy: f32,
 }
 
-/// Convert stable group layouts to screen fractions with a slow, audio-driven expansion.
+/// Convert stable group layouts to screen fractions with subtle floating drift.
 fn star_positions(
     shape: usize,
     single: bool,
@@ -1690,31 +1911,28 @@ fn star_positions(
     energy: f32,
 ) -> [(f32, f32); GROUP_LIMIT] {
     let variation = ((shape as u32).wrapping_mul(0x9e37_79b9).rotate_right(13) >> 24) as f32 / 255.;
-    let spread = 0.88 + variation * 0.26;
+    let spread = 0.92 + variation * 0.14;
     let direction = if shape.is_multiple_of(2) { 1. } else { -1. };
-    let entry = 0.95 + ui::ease_out_cubic((age / 0.28).clamp(0., 1.)) * 0.05;
-    let footprint = entry * (0.90 + energy * 0.31);
-    let sway = 0.58 + energy * 0.42;
+    let entry = 0.96 + ui::ease_out_cubic((age / 0.22).clamp(0., 1.)) * 0.04;
+    let footprint = entry * (0.94 + energy * 0.14);
+    let sway = 0.45 + energy * 0.35;
     GROUP_SHAPES[shape % GROUP_SHAPES.len()].map(|(x, y)| {
         let (x_float, y_float) = drift.map_or((0., 0.), |drift| {
-            let float = drift * (2.1 + energy * 0.2) + x * TAU;
+            let float = drift * (1.8 + energy * 0.18) + x * TAU;
             (
-                float.sin() * 0.011 * sway,
-                (float * 1.7).sin() * 0.022 * sway,
+                float.sin() * 0.008 * sway,
+                (float * 1.6).sin() * 0.014 * sway,
             )
         });
         let (x, y) = if single {
-            (0., -0.06)
+            (0., -0.02)
         } else {
             (
                 (x - 0.5) * spread * direction,
-                (y - 0.49) * (0.89 + variation * 0.15),
+                (y - 0.5) * (0.92 + variation * 0.10),
             )
         };
-        (
-            0.5 + x * footprint + x_float,
-            0.49 + y * footprint + y_float,
-        )
+        (0.5 + x * footprint + x_float, 0.5 + y * footprint + y_float)
     })
 }
 
@@ -1736,7 +1954,6 @@ struct PhraseHandoff {
     fade: f32,
 }
 
-/// Send light toward the first incoming word on its own lyric clock during the overlap.
 fn song_handoff(
     outgoing: &LyricSky,
     incoming: &LyricSky,
@@ -1751,7 +1968,6 @@ fn song_handoff(
     if incoming_at < start || incoming_at >= onset.saturating_add(HANDOFF_TAIL) {
         return None;
     }
-    // Keep the trail anchored to the word visible when it departed.
     let departure = outgoing_at.saturating_sub(incoming_at - start);
     let shape = outgoing
         .groups
@@ -1815,7 +2031,7 @@ fn phrase_handoff(
         energy,
     )[0];
     let previous = previous.map(|(previous, _)| (previous, groups[previous].nodes.len() - 1));
-    let from = previous.map_or((0.48, 0.39), |(previous, last)| {
+    let from = previous.map_or((0.50, 0.42), |(previous, last)| {
         let age = at
             .saturating_sub(groups[previous].nodes[0].start)
             .as_secs_f32();
@@ -1845,13 +2061,13 @@ fn handoff_glow(
             let from = bounds.origin + point(size.x * handoff.from.0, size.y * handoff.from.1);
             let to = bounds.origin + point(size.x * handoff.to.0, size.y * handoff.to.1);
             let delta = to.relative_to(&from);
-            let lift = (delta.x.abs() * 0.14 + delta.y.abs() * 0.06).clamp(rem * 0.60, rem * 2.6);
+            let lift = (delta.x.abs() * 0.10 + delta.y.abs() * 0.05).clamp(rem * 0.45, rem * 2.0);
             let along = |t: f32| {
                 from + delta * t - point(Pixels::ZERO, lift * (t * std::f32::consts::PI).sin())
             };
             let tint = ui::motion::mix(handoff.from_tint, handoff.to_tint, handoff.travel);
             let head = along(handoff.travel);
-            let tail = handoff.travel.min(0.45);
+            let tail = handoff.travel.min(0.42);
             if tail > 0. {
                 let points = std::array::from_fn::<_, 15, _>(|n| {
                     along(handoff.travel - tail * (1. - n as f32 / 14.))
@@ -1860,8 +2076,8 @@ fn handoff_glow(
                     let intensity = ((index + 1) as f32 / 14.).powi(2) * handoff.fade;
                     line(
                         segment,
-                        STAR_TRAIL_WIDTH * 0.78,
-                        tint.opacity(intensity * 0.31),
+                        STAR_TRAIL_WIDTH * 0.72,
+                        tint.opacity(intensity * 0.28),
                         window,
                     );
                     stroke(
@@ -1874,7 +2090,7 @@ fn handoff_glow(
             let glow = handoff.fade * (handoff.travel * 7.).min(1.);
             if glow > 0. {
                 star_halo(head, rem * 0.82, tint, glow, window);
-                paint_anchor(head, rem * 0.16, light.highlight(tint), glow, window);
+                paint_star_node(head, rem * 0.30, tint, light.highlight(tint), glow, window);
             }
         },
     )
@@ -1914,15 +2130,15 @@ fn graph(
     let count = nodes.len();
     let links = group.links;
     let single = count == 1;
-    let reveal = 0.55 + 0.45 * ui::ease_out_cubic((age / 0.20).clamp(0., 1.));
+    let reveal = 0.65 + 0.35 * ui::ease_out_cubic((age / 0.16).clamp(0., 1.));
     let word_age = at.saturating_sub(nodes[active].start);
     let emphasis = if motion {
-        ui::ease_out_cubic((word_age.as_secs_f32() / 0.15).clamp(0., 1.))
+        ui::ease_out_cubic((word_age.as_secs_f32() / 0.085).clamp(0., 1.))
     } else {
         1.
     };
     let sweep = motion.then(|| edge_sweep(nodes, active, at)).flatten();
-    let radius = rem * (0.68 + bass * 0.20 + energy * 0.12);
+    let radius = rem * (0.86 + bass * 0.16 + energy * 0.10);
     let (tint, refraction) = light.node(shape, active);
     let bloom = if motion {
         let rise = (word_age.as_secs_f32() / STAR_ATTACK.as_secs_f32()).clamp(0., 1.);
@@ -1933,7 +2149,6 @@ fn graph(
     } else {
         0.
     };
-    // Keep each word's size anchored to its node while the focus moves.
     let scales = std::array::from_fn::<_, GROUP_LIMIT, _>(|index| {
         if single {
             1.
@@ -1949,11 +2164,11 @@ fn graph(
         energy,
     );
     let held = nodes[active].end.saturating_sub(nodes[active].start);
-    let sustain = if motion && held >= Duration::from_millis(720) && word_age < held {
+    let sustain = if motion && held >= Duration::from_millis(650) && word_age < held {
         let rise = ui::ease_in_out_cubic(progress(word_age, STAR_BLOOM));
-        let fall = ui::ease_in_out_cubic(progress(held - word_age, Duration::from_millis(210)));
+        let fall = ui::ease_in_out_cubic(progress(held - word_age, Duration::from_millis(190)));
         rise * fall
-            * (0.34 + 0.26 * (word_age.as_secs_f32() * 9.).sin().powi(2))
+            * (0.36 + 0.24 * (word_age.as_secs_f32() * 8.).sin().powi(2))
             * (0.7 + energy * 0.5)
     } else {
         0.
@@ -1966,16 +2181,16 @@ fn graph(
         } else {
             (width * 0.56).max(rem * 4.).min(width)
         };
-        let scale = if single { 2.45 } else { 2.85 };
-        let type_size = (rem * scale).min(height * 0.20) * (0.42 + scales[index] * 0.58);
+        let scale = if single { 2.55 } else { 2.65 };
+        let type_size = (rem * scale).min(height * 0.23) * (0.72 + scales[index] * 0.28);
         div()
             .absolute()
             .w(span)
             .left(width * x - span / 2.)
-            .top(height * y + rem * (1.72 - depth * 0.33))
+            .top(height * y + rem * (1.68 - depth * 0.24))
             .text_center()
             .font_family(node.font)
-            .text_size(type_size * (0.88 + depth * 0.12))
+            .text_size(type_size * (0.91 + depth * 0.09))
             .font_weight(FontWeight::BOLD)
             .text_color(foreground)
             .opacity(opacity)
@@ -1985,16 +2200,16 @@ fn graph(
             ))
             .child(node.text.clone())
     };
-    let current_word = hero(active, emphasis, 0.76 + emphasis * 0.24);
+    let current_word = hero(active, emphasis, 0.86 + emphasis * 0.14);
     let departing = active
         .checked_sub(1)
         .filter(|_| motion && word_age < LINK_REVEAL)
         .map(|index| {
             let fade = 1. - ui::ease_out_cubic(word_age.as_secs_f32() / LINK_REVEAL.as_secs_f32());
-            hero(index, fade, fade * 0.58)
+            hero(index, fade, fade * 0.50)
         });
     let link_progress = std::array::from_fn::<_, GROUP_LIMIT, _>(|index| {
-        if motion && links[index].is_some() && index <= active {
+        if motion && index <= active {
             let elapsed = at.saturating_sub(nodes[index].start);
             ui::ease_out_cubic((elapsed.as_secs_f32() / LINK_REVEAL.as_secs_f32()).min(1.))
         } else {
@@ -2013,52 +2228,61 @@ fn graph(
                 move |bounds, (), window, _| {
                     let dots = positions.map(|(x, y)| bounds.origin + point(width * x, height * y));
                     let completed = sweep.map_or(active, |sweep| sweep.target - 1);
+                    let mesh_white = foreground;
+                    // Primary constellation polyline (crisp white wireframe like in the video)
                     if completed > 0 {
-                        stroke(
+                        line(
                             &dots[..=completed],
-                            light.highlight(light.primary).opacity(0.48 * reveal),
+                            px(1.15),
+                            mesh_white.opacity(0.62 * reveal),
                             window,
                         );
                     }
-                    for (end, start) in links.into_iter().enumerate().take(active + 1) {
-                        let Some(start) = start else { continue };
+                    // Triangulating cross-edges forming geometric constellation facets
+                    for (end, pair) in links.into_iter().enumerate().take(active + 1) {
                         let progress = link_progress[end];
                         if progress == 0. {
                             continue;
                         }
-                        let tip = dots[end] + dots[start].relative_to(&dots[end]) * progress;
-                        let branch = light.highlight(light.node(shape, end).1);
-                        stroke(
-                            &[dots[end], tip],
-                            branch.opacity(reveal * (0.31 + 0.17 * (1. - progress)) * progress),
-                            window,
-                        );
-                    }
-                    for (index, dot) in dots.into_iter().take(active + 1).enumerate() {
-                        if index != active {
-                            paint_anchor(
-                                dot,
-                                rem * 0.16 * scales[index],
-                                light.highlight(light.node(shape, index).0),
-                                reveal,
+                        for (slot, start) in pair.into_iter().enumerate() {
+                            let Some(start) = start else { continue };
+                            let tip = dots[end] + dots[start].relative_to(&dots[end]) * progress;
+                            let base_alpha = if slot == 0 { 0.42 } else { 0.25 };
+                            line(
+                                &[dots[end], tip],
+                                px(0.95),
+                                mesh_white.opacity(reveal * base_alpha * progress),
                                 window,
                             );
                         }
                     }
-                    if motion && active > 0 && emphasis < 0.98 {
-                        let size = radius * scales[active - 1];
+                    // Inactive star pinpoints
+                    for (index, dot) in dots.into_iter().take(active + 1).enumerate() {
+                        if index != active {
+                            let (node_tint, _) = light.node(shape, index);
+                            paint_star_node(
+                                dot,
+                                rem * 0.24 * scales[index],
+                                node_tint,
+                                light.highlight(node_tint),
+                                reveal * 0.92,
+                                window,
+                            );
+                        }
+                    }
+                    // Fading ring left behind on the previous active star
+                    if motion && active > 0 && emphasis < 0.96 {
+                        let prev_r = radius * 0.85 * scales[active - 1];
                         arc(
                             dots[active - 1],
-                            size,
+                            prev_r,
                             0.,
                             TAU,
-                            light
-                                .node(shape, active - 1)
-                                .0
-                                .opacity((1. - emphasis) * 0.45),
+                            mesh_white.opacity((1. - emphasis) * 0.45),
                             window,
                         );
                     }
+                    // Snappy comet sweep arriving right on the word onset
                     if let Some(sweep) = sweep {
                         let from = dots[sweep.target - 1];
                         let to = dots[sweep.target];
@@ -2068,12 +2292,13 @@ fn graph(
                         let along = |t| from + delta * t;
                         let head = ui::ease_in_out_cubic(sweep.travel);
                         let marker = along(head);
-                        let span = head.min(0.32 + bass * 0.12);
+                        let span = head.min(0.36 + bass * 0.10);
                         let strength = 1. - ui::ease_out_cubic(sweep.settle);
                         let trail = ui::motion::mix(from_tint, to_tint, head);
-                        stroke(
+                        line(
                             &[from, marker],
-                            light.highlight(light.primary).opacity(0.48 * reveal),
+                            px(1.15),
+                            mesh_white.opacity(0.62 * reveal),
                             window,
                         );
                         for step in 0..8 {
@@ -2084,50 +2309,43 @@ fn graph(
                             let flare = b * b * strength;
                             line(
                                 &segment,
-                                STAR_TRAIL_WIDTH * (1. + bass * 0.45),
-                                trail.opacity(flare * 0.34),
+                                STAR_TRAIL_WIDTH * (1. + bass * 0.35),
+                                trail.opacity(flare * 0.26),
                                 window,
                             );
-                            line(
-                                &segment,
-                                STAR_TRAIL_WIDTH * 0.40,
-                                trail.opacity(flare * 0.64),
-                                window,
-                            );
-                            stroke(
-                                &segment,
-                                light.highlight(trail).opacity(flare * 0.92),
-                                window,
-                            );
+                            line(&segment, px(1.6), mesh_white.opacity(flare * 0.96), window);
                         }
                         if sweep.target > active {
-                            let spark = rem * (0.08 + head * 0.15) * scales[sweep.target];
-                            star_halo(to, spark * 3.1, to_tint, head * 0.34, window);
-                            paint_anchor(to, spark, light.highlight(to_tint), head, window);
+                            let spark = rem * (0.14 + head * 0.18) * scales[sweep.target];
+                            paint_star_node(
+                                to,
+                                spark,
+                                to_tint,
+                                light.highlight(to_tint),
+                                head * 0.85,
+                                window,
+                            );
                         }
                         let head_light = strength * (head * 5.).min(1.);
                         star_halo(
                             marker,
-                            radius * (0.80 + highs * 0.36),
+                            radius * (0.65 + highs * 0.25),
                             trail,
-                            head_light,
+                            head_light * 0.72,
                             window,
                         );
-                        paint_anchor(
+                        paint_star_node(
                             marker,
-                            rem * (0.10 + highs * 0.10),
+                            rem * (0.18 + highs * 0.10),
+                            trail,
                             light.highlight(trail),
                             head_light,
                             window,
                         );
                     }
+                    // Active reticle starburst (crisp white ring + sharp 4-point needle flare)
                     let radius = radius * scales[active];
-                    let intensity = 0.82 + 0.15 * highs + 0.20 * bloom + sustain * 0.2;
-                    let tilt = if motion {
-                        0.10 * (drift * 1.6).sin()
-                    } else {
-                        0.
-                    };
+                    let intensity = (0.90 + 0.10 * highs + 0.14 * bloom + sustain * 0.16).min(1.15);
                     if bloom > 0. {
                         let spread = ui::ease_out_cubic(
                             (word_age.as_secs_f32() / STAR_BLOOM.as_secs_f32()).clamp(0., 1.),
@@ -2138,32 +2356,38 @@ fn graph(
                             spread,
                             bloom * intensity,
                             refraction,
+                            light.highlight(refraction),
                             window,
                         );
                     }
                     if sustain > 0.02 {
-                        let spin = word_age.as_secs_f32() * 1.8;
+                        let spin = word_age.as_secs_f32() * 1.9;
                         arc(
                             dots[active],
-                            radius * 1.56,
+                            radius * 1.38,
                             spin,
-                            TAU * 0.30,
-                            refraction.opacity(sustain),
+                            TAU * 0.32,
+                            mesh_white.opacity(sustain * 0.75),
                             window,
                         );
                         arc(
                             dots[active],
-                            radius * 1.56,
+                            radius * 1.38,
                             spin + TAU * 0.5,
-                            TAU * 0.20,
-                            tint.opacity(sustain * 0.68),
+                            TAU * 0.22,
+                            tint.opacity(sustain * 0.60),
                             window,
                         );
                     }
+                    let tilt = if motion {
+                        0.10 * (drift * 1.6).sin()
+                    } else {
+                        0.
+                    };
                     star_flare(
                         dots[active],
-                        radius * (0.94 + bloom * 0.20),
-                        [tint, refraction, light.highlight(tint)],
+                        radius * (0.95 + bloom * 0.16),
+                        [tint, refraction, mesh_white],
                         tilt,
                         intensity,
                         window,
@@ -2194,12 +2418,13 @@ fn graph(
                         } else {
                             width * x - span / 2.
                         })
-                        .top(height * y + rem * (0.35 + scales[index] * 0.11))
+                        .top(height * y + rem * (0.38 + scales[index] * 0.12))
                         .text_center()
                         .font_family(node.font)
-                        .text_size(rem * (0.28 + scales[index] * 0.61))
+                        .text_size(rem * (0.58 + scales[index] * 0.26))
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(foreground.opacity(reveal * 0.60))
+                        .text_color(foreground.opacity(reveal * 0.78))
+                        .text_shadow(trail_shadows(Theme::dark().background))
                         .when(selected, |this| this.opacity(0.))
                         .child(node.text.clone());
                     if outgoing {
@@ -2228,7 +2453,7 @@ fn lyric_font(text: &str) -> &'static str {
     }
 }
 
-/// Keeps the letter edges white and lets the album tint show through a soft halo.
+/// Crisp drop shadow under active lyrics so bold white text pops over vivid artwork.
 fn lyric_shadows(shade: Hsla, tint: Hsla) -> [TextShadow; 3] {
     let edge = WORD_GLOW / 7.;
     [
@@ -2250,21 +2475,36 @@ fn lyric_shadows(shade: Hsla, tint: Hsla) -> [TextShadow; 3] {
     ]
 }
 
+fn trail_shadows(shade: Hsla) -> [TextShadow; 2] {
+    [
+        TextShadow {
+            color: shade.opacity(0.92),
+            offset: point(Pixels::ZERO, px(1.5)),
+            blur: px(5.),
+        },
+        TextShadow {
+            color: shade.opacity(0.65),
+            offset: Point::default(),
+            blur: px(2.5),
+        },
+    ]
+}
+
 /// Reflected light along the top edge and a soft shadow below give the translucent glyph depth.
 fn clock_reflections(white: Hsla, shade: Hsla, light: Hsla, strength: f32) -> [TextShadow; 3] {
     [
         TextShadow {
-            color: shade.opacity(0.26 * strength),
-            offset: point(Pixels::ZERO, CLOCK_BEVEL * 2.),
-            blur: WORD_GLOW / 2.,
+            color: shade.opacity(0.45 * strength),
+            offset: point(Pixels::ZERO, CLOCK_BEVEL * 2.2),
+            blur: WORD_GLOW * 0.65,
         },
         TextShadow {
-            color: light.opacity(0.14 * strength),
+            color: light.opacity(0.16 * strength),
             offset: point(CLOCK_BEVEL, Pixels::ZERO),
             blur: CLOCK_BEVEL * 2.,
         },
         TextShadow {
-            color: white.opacity(0.31 * strength),
+            color: white.opacity(0.35 * strength),
             offset: point(Pixels::ZERO, -CLOCK_BEVEL),
             blur: CLOCK_BEVEL,
         },
@@ -2279,7 +2519,7 @@ struct ClockOutline<'a> {
 
 impl ClockOutline<'_> {
     fn at(&self, x: f32, y: f32) -> Point<Pixels> {
-        self.origin + point(px(x * self.scale * 0.83), px(-y * self.scale))
+        self.origin + point(px(x * self.scale * 0.85), px(-y * self.scale))
     }
 }
 
@@ -2306,7 +2546,7 @@ impl ttf_parser::OutlineBuilder for ClockOutline<'_> {
     }
 }
 
-/// Paint the glass only inside and along the outlines of the Noto Sans digits.
+/// Paint sleek frosted-glass digits at the top center like in the reference video.
 fn glass_clock(
     time: String,
     height: Pixels,
@@ -2325,7 +2565,7 @@ fn glass_clock(
     let fallback = || {
         div()
             .text_size(height)
-            .text_color(pearl.opacity(0.56))
+            .text_color(pearl.opacity(0.68))
             .child(time.clone())
     };
     let Ok(mut face) =
@@ -2333,7 +2573,7 @@ fn glass_clock(
     else {
         return fallback();
     };
-    face.set_variation(ttf_parser::Tag::from_bytes(b"wght"), 610.);
+    face.set_variation(ttf_parser::Tag::from_bytes(b"wght"), 560.);
     let glyphs = time
         .chars()
         .filter_map(|ch| {
@@ -2348,13 +2588,13 @@ fn glass_clock(
         return fallback();
     };
     let scale = f32::from(height) / f32::from(cap.height());
-    let width = px(glyphs.iter().map(|(_, advance)| advance).sum::<f32>() * scale * 0.83);
+    let width = px(glyphs.iter().map(|(_, advance)| advance).sum::<f32>() * scale * 0.85);
     div().child(
         div()
             .id("constellation-clock")
             .role(Role::Label)
             .aria_label(time)
-            .pt_3()
+            .pt_1()
             .child(
                 canvas(
                     |_, _, _| {},
@@ -2372,21 +2612,19 @@ fn glass_clock(
                                         scale,
                                     },
                                 );
-                                origin.x += px(advance * scale * 0.83);
+                                origin.x += px(advance * scale * 0.85);
                             }
                             path.build()
                         };
-                        if contrast > 0.01 {
-                            for (width, opacity) in [(7., 0.08), (3.6, 0.24)] {
-                                if let Ok(path) = outline(
-                                    PathBuilder::stroke(CLOCK_BEVEL * width),
-                                    point(Pixels::ZERO, CLOCK_BEVEL * 1.8),
-                                ) {
-                                    window.paint_path(
-                                        path,
-                                        dark.background.opacity(contrast * opacity),
-                                    );
-                                }
+                        for (width, opacity) in [(6.5, 0.12), (3.2, 0.24)] {
+                            if let Ok(path) = outline(
+                                PathBuilder::stroke(CLOCK_BEVEL * width),
+                                point(Pixels::ZERO, CLOCK_BEVEL * 2.0),
+                            ) {
+                                window.paint_path(
+                                    path,
+                                    dark.background.opacity((0.35 + contrast * 0.65) * opacity),
+                                );
                             }
                         }
                         if let Ok(path) = outline(PathBuilder::fill(), Point::default()) {
@@ -2399,7 +2637,6 @@ fn glass_clock(
                                 ),
                             );
                         }
-                        // A broad reflection and a muted inner bevel give the rim a soft falloff.
                         for (width, strength) in
                             [(8., 0.038), (5., 0.062), (2.8, 0.105), (1.3, 0.20)]
                         {
@@ -2409,13 +2646,13 @@ fn glass_clock(
                                 window.paint_path(
                                     path,
                                     linear_gradient(
-                                        angle - 7.,
+                                        angle - 8.,
                                         linear_color_stop(
-                                            pearl.opacity(strength * (1. + contrast * 0.35)),
+                                            pearl.opacity(strength * (1. + contrast * 0.25)),
                                             0.,
                                         ),
                                         linear_color_stop(
-                                            shade.opacity(strength * (0.41 + contrast * 0.20)),
+                                            shade.opacity(strength * (0.45 + contrast * 0.20)),
                                             1.,
                                         ),
                                     ),
@@ -2430,36 +2667,39 @@ fn glass_clock(
     )
 }
 
-/// Send a soft ring and a few small glints out from the star as the sung word arrives.
+/// Crisp expanding white shockwave ring when a new word lands on the beat.
+/// Send a soft ring and tiny 4-point star glints out as the sung word arrives.
 fn star_glints(
     center: Point<Pixels>,
     radius: Pixels,
     spread: f32,
     intensity: f32,
     tint: Hsla,
+    core: Hsla,
     window: &mut Window,
 ) {
-    let ring = radius * (1.27 + spread * 1.20);
+    let ring = radius * (1.18 + spread * 1.15);
     arc(
         center,
         ring,
         0.,
         TAU,
-        tint.opacity(intensity * 0.40),
+        tint.opacity(intensity * 0.42),
         window,
     );
     for (angle, reach, size) in [
-        (-1.08_f32, 1., 0.13),
-        (-2.77, 0.78, 0.09),
-        (0.38, 1.16, 0.11),
+        (-1.08_f32, 1., 0.22),
+        (-2.77, 0.80, 0.16),
+        (0.38, 1.14, 0.19),
     ] {
         let distance = ring * reach;
         let position = center + point(distance * angle.cos(), distance * angle.sin());
-        paint_anchor(position, radius * size, tint, intensity, window);
+        paint_star_node(position, radius * size, tint, core, intensity, window);
     }
 }
 
-/// Layer the cover's two hues under a sharp cross and a small bright core.
+/// Crisp circular reticle ring sliced by an upright 4-point needle star,
+/// layered over the original 7-layer cover-tinted halo.
 fn star_flare(
     center: Point<Pixels>,
     radius: Pixels,
@@ -2468,33 +2708,37 @@ fn star_flare(
     intensity: f32,
     window: &mut Window,
 ) {
-    star_halo(center, radius * 2.75, tint, intensity * 0.92, window);
-    let ring_radius = radius * 1.18;
+    star_halo(center, radius * 2.65, tint, intensity * 0.88, window);
+
+    let ring_radius = radius * 1.06;
     let ring = std::array::from_fn::<_, 41, _>(|step| {
         let angle = step as f32 * TAU / 40.;
         center + point(ring_radius * angle.cos(), ring_radius * angle.sin())
     });
-    for (width, alpha) in [(0.31, 0.05), (0.16, 0.12), (0.065, 0.26)] {
+    for (width, color, alpha) in [
+        (0.28, refraction, 0.14),
+        (0.15, refraction, 0.28),
+        (0.082, core, 0.90),
+    ] {
         line(
             &ring,
             radius * width,
-            refraction.opacity(alpha * intensity),
+            color.opacity((alpha * intensity).min(1.)),
             window,
         );
     }
-    for axis in 0..4 {
-        let angle = tilt + axis as f32 * TAU / 8.;
-        let diagonal = axis % 2 != 0;
-        let length = radius * if diagonal { 1.45 } else { 2.55 };
+
+    for axis in 0..2 {
+        let angle = tilt + axis as f32 * TAU / 4.;
+        let length = radius * 1.56;
         let tip = point(length * angle.cos(), length * angle.sin());
-        let color = if diagonal { refraction } else { tint };
         for (reach, width, color, alpha) in [
-            (1., 0.27, color, 0.22),
-            (0.89, 0.15, color, 0.44),
-            (0.74, 0.075, core, 0.64),
-            (0.49, 0.036, core, 0.93),
+            (1.0, 0.22, tint, 0.24),
+            (0.92, 0.13, tint, 0.48),
+            (0.84, 0.078, core, 0.78),
+            (0.68, 0.042, core, 0.98),
         ] {
-            let width = radius * width * if diagonal { 0.38 } else { 1. };
+            let width = radius * width;
             let normal = point(-width * angle.sin(), width * angle.cos());
             let mut path = PathBuilder::fill();
             path.add_polygon(
@@ -2507,43 +2751,62 @@ fn star_flare(
                 true,
             );
             if let Ok(path) = path.build() {
-                let strength = if diagonal { 0.58 } else { 1. };
-                window.paint_path(path, color.opacity(alpha * strength * intensity));
+                window.paint_path(path, color.opacity((alpha * intensity).min(1.)));
             }
         }
     }
-    star_halo(center, radius * 0.53, core, intensity, window);
+
+    star_halo(center, radius * 0.40, core, intensity, window);
 }
 
-fn paint_anchor(dot: Point<Pixels>, size: Pixels, core: Hsla, opacity: f32, window: &mut Window) {
-    let mut star = PathBuilder::fill();
-    star.add_polygon(
-        &[
-            dot + point(-size, Pixels::ZERO),
-            dot + point(Pixels::ZERO, -size),
-            dot + point(size, Pixels::ZERO),
-            dot + point(Pixels::ZERO, size),
-        ],
-        true,
-    );
-    if let Ok(path) = star.build() {
-        window.paint_path(path, core.opacity(opacity * 0.78));
+/// Crisp slender 4-point concave star (`✦`) rendered on every node in the constellation.
+fn paint_star_node(
+    dot: Point<Pixels>,
+    size: Pixels,
+    tint: Hsla,
+    core: Hsla,
+    opacity: f32,
+    window: &mut Window,
+) {
+    star_halo(dot, size * 1.45, tint, opacity * 0.38, window);
+    for (scale, inner_ratio, color, strength) in [(1.0, 0.18, tint, 0.52), (0.88, 0.14, core, 0.96)]
+    {
+        let r = size * scale;
+        let inner = r * inner_ratio;
+        let points = [
+            dot + point(Pixels::ZERO, -r),
+            dot + point(inner, -inner),
+            dot + point(r, Pixels::ZERO),
+            dot + point(inner, inner),
+            dot + point(Pixels::ZERO, r),
+            dot + point(-inner, inner),
+            dot + point(-r, Pixels::ZERO),
+            dot + point(-inner, -inner),
+        ];
+        let mut star = PathBuilder::fill();
+        star.add_polygon(&points, true);
+        if let Ok(path) = star.build() {
+            window.paint_path(path, color.opacity((opacity * strength).min(1.)));
+        }
     }
 }
 
 /// Expanding translucent disks feather the star without blurring its sharp center.
 fn star_halo(center: Point<Pixels>, radius: Pixels, tint: Hsla, opacity: f32, window: &mut Window) {
-    for step in (1..=7).rev() {
-        let distance = step as f32 / 7.;
+    for step in (1..=HALO_STEPS).rev() {
+        let distance = step as f32 / HALO_STEPS as f32;
         let ring = radius * distance;
-        let points = std::array::from_fn::<_, 20, _>(|index| {
-            let angle = index as f32 * TAU / 20.;
+        let points = std::array::from_fn::<_, HALO_POINTS, _>(|index| {
+            let angle = index as f32 * TAU / HALO_POINTS as f32;
             center + point(ring * angle.cos(), ring * angle.sin())
         });
         let mut path = PathBuilder::fill();
         path.add_polygon(&points, true);
         if let Ok(path) = path.build() {
-            window.paint_path(path, tint.opacity(opacity * (1. - distance * 0.9) / 3.));
+            window.paint_path(
+                path,
+                tint.opacity(opacity * (1. - distance * 0.9) / HALO_STEPS as f32),
+            );
         }
     }
 }
@@ -2556,15 +2819,15 @@ fn arc(
     color: Hsla,
     window: &mut Window,
 ) {
-    let points = std::array::from_fn::<_, 25, _>(|step| {
-        let angle = start + sweep * step as f32 / 24.;
+    let points = std::array::from_fn::<_, 29, _>(|step| {
+        let angle = start + sweep * step as f32 / 28.;
         center + point(radius * angle.cos(), radius * angle.sin())
     });
     stroke(&points, color, window);
 }
 
 fn stroke(points: &[Point<Pixels>], color: Hsla, window: &mut Window) {
-    line(points, px(1.), color, window);
+    line(points, px(1.1), color, window);
 }
 
 fn line(points: &[Point<Pixels>], width: Pixels, color: Hsla, window: &mut Window) {

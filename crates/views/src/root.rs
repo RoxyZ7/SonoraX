@@ -1470,11 +1470,7 @@ impl Render for Root {
                     ),
                 )
             })
-            .when_else(
-                show_sign_in,
-                |this| this.child(div().flex().flex_1().min_h_0().child(self.login.clone())),
-                |this| this.child(shell),
-            );
+            .when(!show_sign_in, |this| this.child(shell));
         // A closed menu or dialog fades out here, over everything else in the window.
         let root = root.child(ui::lingers());
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]

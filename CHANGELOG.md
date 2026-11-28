@@ -5,7 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.50.31] - 2026-11-28
+
+### Added
+
+- Mini player Glass Card treatment when translucent mode is enabled, with top specular border highlight and soft shadow.
+- Smooth reticle glide (`reticle_glide`), glowing edge wake fade, and 4-point star nodes (`✦`) with triangulated constellation meshes in fullscreen Constellation mode.
+- Vocal-band DSP filtering (`180 Hz` high-pass, `2.6 kHz` presence boost, `6.2 kHz` low-pass), Whisper DTW (`-dtw small`), Thai UTF-8 BPE recovery, phonetic homophone matching, global offset estimation, and PCM vocal-onset snapping for Auto sync lyrics.
+
+### Changed
+
+- Constellation lyrics use `estimated_line_end`, Thai syllable weighting (`spoken_units`), and `CONSTELLATION_LEAD` / `DTW_LEAD_MS` alignment so words land on the vocal beat.
+- YouTube Music playback uses IPv4-bound `reqwest` clients with explicit connect/read timeouts, an HTTP/1.1 stream client for `googlevideo.com`, per-client step timeouts, and cached fallback reuse.
+
+### Fixed
+
+- Automatically synced constellation words no longer lag behind Thai or English vocals.
+- The signed-out welcome screen opens without duplicate accessibility nodes.
+- YouTube Music `stream metadata timed out` stalls are avoided by switching clients promptly when a route stalls.
 
 ## [0.50.3] - 2026-11-22
 

@@ -28,7 +28,7 @@ use crate::{Encoding, Offer, PlaybackConfig, PlaybackEvents, PlaybackFactory, Pl
 /// How long the stream metadata, and then the preroll, may each take before the attempt is
 /// given up. The stream host has no timeout of its own, so a connection it dropped halfway
 /// would otherwise hold the engine on a silent track forever.
-const PATIENCE: Duration = Duration::from_secs(15);
+const PATIENCE: Duration = Duration::from_secs(20);
 /// The attempts a fetch gets before the track is reported unavailable.
 const ATTEMPTS: u32 = 2;
 /// The level the stream host measures `loudnessDb` against, in LUFS.

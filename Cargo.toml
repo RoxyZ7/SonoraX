@@ -4,7 +4,7 @@ members = ["crates/*"]
 exclude = ["vendor"]
 
 [workspace.package]
-version = "0.50.3"
+version = "0.50.31"
 edition = "2024"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/RoxyZ7/SonoraX"
@@ -299,3 +299,6 @@ opt-level = 3
 
 [profile.dev.package.rusty_aac]
 opt-level = 3
+
+[patch."https://github.com/sonorahq/ytmusic-rs"]
+ytmusic = { path = "crates/ytmusic-local" }

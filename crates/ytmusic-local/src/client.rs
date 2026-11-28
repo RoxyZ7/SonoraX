@@ -1,0 +1,858 @@
+use std::{
+    net::{IpAddr, Ipv4Addr},
+    path::{Path, PathBuf},
+    sync::{Arc, MutexGuard, atomic::AtomicU8},
+    time::{Duration, Instant},
+};
+
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const API_READ_TIMEOUT: Duration = Duration::from_secs(8);
+const STREAM_READ_TIMEOUT: Duration = Duration::from_secs(8);
+const TCP_KEEPALIVE: Duration = Duration::from_secs(30);
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(20);
+
+use anyhow::{Context as _, Result, bail};
+use reqwest::header::SET_COOKIE;
+use reqwest_cookie_store::{CookieStore, CookieStoreMutex, RawCookie};
+use serde_json::{Value, json};
+use tokio::sync::RwLock;
+
+use crate::context::Client;
+
+const API_BASE: &str = "https://www.youtube.com/youtubei/v1/";
+const MUSIC_API_BASE: &str = "https://music.youtube.com/youtubei/v1/";
+/// Where YouTube Music uploads a playlist's own picture before `edit_playlist` attaches it.
+const THUMBNAIL_UPLOAD: &str =
+    "https://music.youtube.com/playlist_image_upload/playlist_custom_thumbnail";
+const VISITOR_URL: &str = "https://www.youtube.com/sw.js_data";
+/// Where the signed-in account's data sync id is published.
+const HOME_URL: &str = "https://www.youtube.com/";
+/// The page whose player configuration says what a `WEB_REMIX` stream token is bound to.
+const MUSIC_URL: &str = "https://music.youtube.com/";
+/// The experiment that binds a stream token to the video instead of the session.
+const CONTENT_BINDING: &str = "html5_generate_content_po_token";
+/// How long a reading of the experiment flags is trusted before the page is read again.
+const FLAGS_KEEP: Duration = Duration::from_secs(60 * 60);
+/// How long a failed reading of the flags stands before the page is tried again.
+const FLAGS_RETRY: Duration = Duration::from_secs(60);
+/// The url a pasted cookie is stored against. A `youtube.com` domain cookie stored here
+/// also matches `www.youtube.com`.
+const COOKIE_ORIGIN: &str = "https://music.youtube.com/";
+/// Attributes added to each pasted cookie. A header value has none, and the store does
+/// not write a cookie without an expiry to disk.
+const SEEDED: &str = "Domain=youtube.com; Path=/; Secure; Max-Age=34560000";
+/// Attributes for a `__Host-` cookie, which cannot have a domain.
+const SEEDED_HOST_ONLY: &str = "Path=/; Secure; Max-Age=34560000";
+const SAPISID: [&str; 2] = ["SAPISID", "__Secure-3PAPISID"];
+/// Where a YouTube tab asks Google for fresh `__Secure-*PSIDTS` cookies. The frame that calls
+/// it lives on `accounts.youtube.com`, so the request carries that origin.
+const ROTATE_URL: &str = "https://accounts.youtube.com/RotateCookies";
+const ROTATE_ORIGIN: &str = "https://accounts.youtube.com";
+/// The fixed body the rotation frame sends.
+const ROTATE_BODY: &str = r#"[000,"-0000000000000000000"]"#;
+/// What Google's "Sorry..." page carries in place of an API answer. It is the 403 that refuses
+/// a network sending automated queries, or the captcha under `/sorry/` that limits one.
+const SORRY: [&str; 2] = ["<title>Sorry...</title>", "/sorry/"];
+
+/// The error a request fails with when Google answers with its "Sorry..." page instead of the
+/// API. Google refuses the network the request came from, often a VPN server, so every request
+/// from it fails the same way until the network changes.
+#[derive(Clone, Copy, Debug)]
+pub struct NetworkBlocked;
+
+impl std::fmt::Display for NetworkBlocked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("youtube refuses requests from this network")
+    }
+}
+
+impl std::error::Error for NetworkBlocked {}
+
+pub struct YtMusic {
+    pub(crate) http: reqwest::Client,
+    pub(crate) stream_http: reqwest::Client,
+    pub(crate) premium_misses: AtomicU8,
+    visitor: RwLock<Option<String>>,
+    solver: RwLock<Option<std::sync::Arc<crate::deobf::Solver>>>,
+    player_cache: Option<PathBuf>,
+    authed: Option<Authed>,
+    authuser: usize,
+    page_id: Option<String>,
+    pub(crate) resolve_cache: crate::dedup::ResolveCache,
+    pub(crate) po_tokens: crate::potoken::PoTokens,
+    /// The account's data sync id, once it has been looked for. The inner `None` records a
+    /// look that found nothing, so a signed-in run asks Google for it exactly once.
+    data_sync: RwLock<Option<Option<String>>>,
+    /// The last reading of the YouTube Music page's experiment flags.
+    flags: RwLock<Option<Flags>>,
+    hl: String,
+    gl: String,
+}
+
+/// Whether the YouTube Music page binds stream tokens to the video, as read at `at`. A failed
+/// read counts as unbound, which is how yt-dlp treats a page it could not get, and is retried
+/// sooner.
+#[derive(Clone, Copy)]
+struct Flags {
+    content_bound: bool,
+    read: bool,
+    at: Instant,
+}
+
+/// The cookies of a signed-in account, the http client that sends them and stores the
+/// ones Google sets in response, and the file they are saved to. Guest requests use the
+/// plain client and send no cookies.
+struct Authed {
+    http: reqwest::Client,
+    cookies: Arc<CookieStoreMutex>,
+    file: Option<PathBuf>,
+}
+
+fn build_api_http(cookies: Option<Arc<CookieStoreMutex>>) -> reqwest::Client {
+    let mut builder = reqwest::Client::builder()
+        .local_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(API_READ_TIMEOUT)
+        .tcp_nodelay(true)
+        .tcp_keepalive(TCP_KEEPALIVE)
+        .pool_idle_timeout(POOL_IDLE_TIMEOUT);
+    if let Some(store) = cookies {
+        builder = builder.cookie_provider(store);
+    }
+    builder.build().expect("reqwest api client")
+}
+
+fn build_stream_http() -> reqwest::Client {
+    reqwest::Client::builder()
+        .local_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+        .http1_only()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(STREAM_READ_TIMEOUT)
+        .tcp_nodelay(true)
+        .tcp_keepalive(TCP_KEEPALIVE)
+        .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+        .build()
+        .expect("reqwest stream client")
+}
+
+impl YtMusic {
+    /// Signs in with the value of a `Cookie` request header: `name=value` pairs joined by
+    /// `;`. The caller removes anything else first.
+    pub fn with_cookies(cookies: impl Into<String>) -> Self {
+        let store = Arc::new(CookieStoreMutex::new(seed(&cookies.into())));
+        let http = build_api_http(Some(store.clone()));
+        Self {
+            authed: Some(Authed {
+                http,
+                cookies: store,
+                file: None,
+            }),
+            ..Self::anonymous()
+        }
+    }
+
+    pub fn anonymous() -> Self {
+        Self {
+            http: build_api_http(None),
+            stream_http: build_stream_http(),
+            premium_misses: AtomicU8::new(0),
+            visitor: RwLock::new(None),
+            solver: RwLock::new(None),
+            player_cache: None,
+            authed: None,
+            authuser: 0,
+            page_id: None,
+            resolve_cache: crate::dedup::ResolveCache::memory(),
+            po_tokens: crate::potoken::PoTokens::default(),
+            data_sync: RwLock::new(None),
+            flags: RwLock::new(None),
+            hl: "en".to_string(),
+            gl: "US".to_string(),
+        }
+    }
+
+    pub fn as_user(mut self, authuser: usize) -> Self {
+        self.authuser = authuser;
+        self
+    }
+
+    pub fn as_page(mut self, page_id: impl Into<String>) -> Self {
+        self.page_id = Some(page_id.into());
+        self
+    }
+
+    pub fn cache_resolutions(mut self, path: PathBuf) -> Self {
+        self.resolve_cache = crate::dedup::ResolveCache::disk(path);
+        self
+    }
+
+    pub fn cache_player(mut self, path: PathBuf) -> Self {
+        self.player_cache = Some(path);
+        self
+    }
+
+    /// Mints proof-of-origin tokens through `minter`, a host that has a browser to run
+    /// BotGuard in. Without one the client still sends cold start tokens, which only cover
+    /// the start of a stream.
+    pub fn mint_po_tokens(mut self, minter: Arc<dyn crate::potoken::Minter>) -> Self {
+        self.po_tokens = crate::potoken::PoTokens::new(Some(minter));
+        self
+    }
+
+    /// Saves the signed-in cookies to `path`. An existing file replaces the pasted cookies,
+    /// and every cookie Google sets afterwards is written back. Does nothing for a guest.
+    pub fn persist_cookies(mut self, path: PathBuf) -> Self {
+        let Some(authed) = self.authed.as_mut() else {
+            return self;
+        };
+        if let Some(loaded) = load(&path) {
+            *authed.store() = loaded;
+        }
+        authed.file = Some(path);
+        self
+    }
+
+    pub async fn execute(&self, endpoint: &str, client: Client, payload: Value) -> Result<Value> {
+        self.execute_with(endpoint, client, payload, true).await
+    }
+
+    pub async fn execute_with(
+        &self,
+        endpoint: &str,
+        client: Client,
+        payload: Value,
+        use_auth: bool,
+    ) -> Result<Value> {
+        self.execute_visiting(endpoint, client, payload, use_auth, None)
+            .await
+    }
+
+    pub(crate) async fn execute_visiting(
+        &self,
+        endpoint: &str,
+        client: Client,
+        payload: Value,
+        use_auth: bool,
+        guest: Option<&str>,
+    ) -> Result<Value> {
+        let authed = self.authed.as_ref().filter(|_| use_auth);
+        let authenticated = authed.is_some();
+        let held = match authenticated {
+            true => String::new(),
+            false => match guest {
+                Some(guest) => guest.to_string(),
+                None => self.visitor().await,
+            },
+        };
+        let visitor = held.as_str();
+        let mut body = payload;
+        let context = client.context(visitor, &self.hl, &self.gl);
+        body.as_object_mut()
+            .context("payload must be an object")?
+            .insert("context".to_string(), context);
+        if client == Client::Music {
+            body["isAudioOnly"] = json!(true);
+        }
+        let (base, origin) = match client {
+            Client::Music => (MUSIC_API_BASE, "https://music.youtube.com"),
+            _ => (API_BASE, "https://www.youtube.com"),
+        };
+        let url = format!("{base}{endpoint}?prettyPrint=false&alt=json");
+        let http = authed.map_or(&self.http, |authed| &authed.http);
+        let mut request = http
+            .post(&url)
+            .header("Accept", "*/*")
+            .header("Accept-Language", "*")
+            .header("Content-Type", "application/json")
+            .header("Origin", origin)
+            .header("User-Agent", client.user_agent())
+            .header("X-Youtube-Client-Name", client.id().to_string())
+            .header("X-Youtube-Client-Version", client.version())
+            .json(&body);
+        match authed {
+            Some(authed) => {
+                let authorization = authed
+                    .authorization(origin)
+                    .context("cookies have no SAPISID")?;
+                request = request
+                    .header("Authorization", authorization)
+                    .header("X-Origin", origin)
+                    .header("X-Goog-AuthUser", self.authuser.to_string());
+                if let Some(page) = &self.page_id {
+                    request = request.header("X-Goog-PageId", page);
+                }
+            }
+            None => request = request.header("X-Goog-Visitor-Id", visitor),
+        }
+        let response = request
+            .send()
+            .await
+            .with_context(|| format!("cannot reach {endpoint}"))?;
+        let status = response.status();
+        if let Some(authed) = authed
+            && response.headers().contains_key(SET_COOKIE)
+        {
+            authed.save();
+        }
+        let body = response
+            .bytes()
+            .await
+            .with_context(|| format!("cannot read {endpoint} response"))?;
+        log::debug!(
+            "{endpoint} via {}: {status}, {} bytes",
+            client.name(),
+            body.len()
+        );
+        let Ok(value) = serde_json::from_slice::<Value>(&body) else {
+            let text = String::from_utf8_lossy(&body);
+            if SORRY.iter().any(|mark| text.contains(mark)) {
+                let refused = format!("{endpoint} answered {status} with google's sorry page");
+                log::warn!("{refused}");
+                return Err(anyhow::Error::new(NetworkBlocked).context(refused));
+            }
+            log::warn!(
+                "{endpoint} non-json body: {}",
+                String::from_utf8_lossy(&body[..body.len().min(600)])
+            );
+            bail!("{endpoint} returned non-json response with status {status}");
+        };
+        if let Some(error) = value.get("error") {
+            log::warn!("{endpoint} error body: {error}");
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown error");
+            bail!("{endpoint} failed ({status}): {message}");
+        }
+        if !status.is_success() {
+            bail!("{endpoint} failed with status {status}");
+        }
+        Ok(value)
+    }
+
+    /// Uploads `image` as a playlist thumbnail through Google's resumable upload protocol and
+    /// answers the encrypted blob id `edit_playlist` attaches. Only a signed-in client can.
+    pub(crate) async fn upload_playlist_image(&self, image: Vec<u8>) -> Result<String> {
+        let authed = self
+            .authed
+            .as_ref()
+            .context("uploading a thumbnail needs a signed-in account")?;
+        let origin = "https://music.youtube.com";
+        let signed = |request: reqwest::RequestBuilder| -> Result<reqwest::RequestBuilder> {
+            let authorization = authed
+                .authorization(origin)
+                .context("cookies have no SAPISID")?;
+            let mut request = request
+                .header("Origin", origin)
+                .header("X-Origin", origin)
+                .header("Referer", MUSIC_URL)
+                .header("User-Agent", Client::Music.user_agent())
+                .header("X-Youtube-Client-Name", Client::Music.id().to_string())
+                .header("X-Youtube-Client-Version", Client::Music.version())
+                .header("Authorization", authorization)
+                .header("X-Goog-AuthUser", self.authuser.to_string());
+            if let Some(page) = &self.page_id {
+                request = request.header("X-Goog-PageId", page);
+            }
+            Ok(request)
+        };
+
+        let started = signed(authed.http.post(THUMBNAIL_UPLOAD))?
+            .header(
+                "Content-Type",
+                "application/x-www-form-urlencoded;charset=utf-8",
+            )
+            .header("Content-Length", "0")
+            .header("X-Goog-Upload-Command", "start")
+            .header("X-Goog-Upload-Protocol", "resumable")
+            .header(
+                "X-Goog-Upload-Header-Content-Length",
+                image.len().to_string(),
+            )
+            .send()
+            .await
+            .context("cannot start the thumbnail upload")?;
+        let status = started.status();
+        if !status.is_success() {
+            bail!("starting the thumbnail upload failed with status {status}");
+        }
+        let target = match started.headers().get("X-Goog-Upload-URL") {
+            Some(url) => url
+                .to_str()
+                .context("the upload url is not text")?
+                .to_owned(),
+            None => {
+                let id = started
+                    .headers()
+                    .get("X-GUploader-UploadID")
+                    .context("the upload names no target")?
+                    .to_str()
+                    .context("the upload id is not text")?;
+                format!("{THUMBNAIL_UPLOAD}?upload_id={id}&upload_protocol=resumable")
+            }
+        };
+
+        let sent = signed(authed.http.post(&target))?
+            .header("X-Goog-Upload-Command", "upload, finalize")
+            .header("X-Goog-Upload-Offset", "0")
+            .body(image)
+            .send()
+            .await
+            .context("cannot send the thumbnail")?;
+        let status = sent.status();
+        if sent.headers().contains_key(SET_COOKIE) {
+            authed.save();
+        }
+        let body = sent
+            .bytes()
+            .await
+            .context("cannot read the thumbnail upload response")?;
+        if !status.is_success() {
+            bail!("the thumbnail upload failed with status {status}");
+        }
+        let reply: Value =
+            serde_json::from_slice(&body).context("the thumbnail upload answered no json")?;
+        reply["encryptedBlobId"]
+            .as_str()
+            .map(str::to_owned)
+            .context("the thumbnail upload answered no blob id")
+    }
+
+    /// Asks Google to rotate the session's timestamp cookies and saves the store. A browser tab
+    /// does this about every ten minutes, and Google stops accepting a session nobody rotates
+    /// within the hour. Fails for a guest, when Google refuses the cookies, and with a 429 when
+    /// the session rotated less than ten minutes ago.
+    pub async fn rotate_cookies(&self) -> Result<()> {
+        let authed = self
+            .authed
+            .as_ref()
+            .context("the session is not signed in")?;
+        let response = authed
+            .http
+            .post(ROTATE_URL)
+            .header("Content-Type", "application/json")
+            .header("Origin", ROTATE_ORIGIN)
+            .header("User-Agent", Client::Music.user_agent())
+            .body(ROTATE_BODY)
+            .send()
+            .await
+            .context("cannot reach the cookie rotation endpoint")?;
+        let status = response.status();
+        let rotated = response.headers().get_all(SET_COOKIE).iter().count();
+        log::debug!("ytmusic: RotateCookies: {status}, {rotated} cookies set");
+        if rotated > 0 {
+            authed.save();
+        }
+        if !status.is_success() {
+            bail!("cookie rotation failed with status {status}");
+        }
+        Ok(())
+    }
+
+    pub fn is_cookie_auth(&self) -> bool {
+        self.authed.is_some()
+    }
+
+    pub fn is_authenticated(&self) -> bool {
+        self.authed.is_some()
+    }
+
+    pub fn authuser(&self) -> usize {
+        self.authuser
+    }
+
+    pub fn client(&self) -> &reqwest::Client {
+        &self.http
+    }
+
+    pub(crate) async fn solver(&self) -> Result<std::sync::Arc<crate::deobf::Solver>> {
+        if let Some(ready) = self.solver.read().await.clone() {
+            return Ok(ready);
+        }
+        let mut slot = self.solver.write().await;
+        if let Some(ready) = slot.clone() {
+            return Ok(ready);
+        }
+        let cache = self.player_cache.clone();
+        let script = crate::deobf::fetch(&self.http, cache.as_deref()).await?;
+        let id = script.id.clone();
+        let started = std::time::Instant::now();
+        let solver =
+            tokio::task::spawn_blocking(move || crate::deobf::Solver::start(script, cache))
+                .await
+                .context("the deobfuscator did not start")??;
+        log::debug!("deobf: player {id} ready in {:?}", started.elapsed());
+        let solver = std::sync::Arc::new(solver);
+        *slot = Some(solver.clone());
+        Ok(solver)
+    }
+
+    pub(crate) async fn visitor(&self) -> String {
+        if let Some(ready) = self.visitor.read().await.clone() {
+            return ready;
+        }
+        let mut slot = self.visitor.write().await;
+        if let Some(ready) = slot.clone() {
+            return ready;
+        }
+        match fetch_visitor(&self.http).await {
+            Ok(issued) => {
+                *slot = Some(issued.clone());
+                issued
+            }
+            Err(error) => {
+                log::warn!("ytmusic: cannot fetch a visitor id, asking again next time: {error:#}");
+                String::new()
+            }
+        }
+    }
+
+    pub(crate) async fn adopt_visitor(&self, issued: String) {
+        *self.visitor.write().await = Some(issued);
+    }
+
+    /// What a proof-of-origin token for this session is bound to: the account's data sync id
+    /// when the cookies name one, and the visitor id otherwise. YouTube refuses a token bound
+    /// to anything else, so a signed-in run that cannot read its data sync id sends nothing
+    /// rather than a token for the wrong identity.
+    pub(crate) async fn session_binding(&self) -> Option<String> {
+        match self.is_authenticated() {
+            true => self.data_sync_id().await,
+            false => Some(self.visitor().await).filter(|visitor| !visitor.is_empty()),
+        }
+    }
+
+    /// What the stream token for `video_id` is bound to. While the YouTube Music page has the
+    /// content binding experiment on, that is the video id. Otherwise it is the session, as
+    /// [`session_binding`](Self::session_binding) works it out.
+    pub(crate) async fn stream_binding(&self, video_id: &str) -> Option<String> {
+        match self.content_bound().await {
+            true => Some(video_id.to_string()),
+            false => self.session_binding().await,
+        }
+    }
+
+    /// Whether the YouTube Music page has the content binding experiment on. The page is read
+    /// at most once an hour, and a minute after a read that failed.
+    async fn content_bound(&self) -> bool {
+        if let Some(flags) = *self.flags.read().await
+            && flags.fresh()
+        {
+            return flags.content_bound;
+        }
+        let mut slot = self.flags.write().await;
+        if let Some(flags) = *slot
+            && flags.fresh()
+        {
+            return flags.content_bound;
+        }
+        let flags = match fetch_content_bound(self).await {
+            Ok(content_bound) => {
+                log::debug!("potoken: stream tokens are bound to the video: {content_bound}");
+                Flags {
+                    content_bound,
+                    read: true,
+                    at: Instant::now(),
+                }
+            }
+            Err(error) => {
+                log::warn!("ytmusic: cannot read the music page's experiment flags: {error:#}");
+                Flags {
+                    content_bound: false,
+                    read: false,
+                    at: Instant::now(),
+                }
+            }
+        };
+        *slot = Some(flags);
+        flags.content_bound
+    }
+
+    /// The account's data sync id, read once out of the signed-in home page and kept for the
+    /// life of the client. It changes only when the account does, and a client signs in once.
+    async fn data_sync_id(&self) -> Option<String> {
+        if let Some(ready) = self.data_sync.read().await.clone() {
+            return ready;
+        }
+        let mut slot = self.data_sync.write().await;
+        if let Some(ready) = slot.clone() {
+            return ready;
+        }
+        let found = match fetch_data_sync_id(self).await {
+            Ok(found) => Some(found),
+            Err(error) => {
+                log::warn!("ytmusic: cannot read the data sync id: {error:#}");
+                None
+            }
+        };
+        *slot = Some(found.clone());
+        found
+    }
+
+    pub fn lang(&self) -> &str {
+        &self.hl
+    }
+
+    pub fn region(&self) -> &str {
+        &self.gl
+    }
+}
+
+async fn fetch_visitor(http: &reqwest::Client) -> Result<String> {
+    let body = http
+        .get(VISITOR_URL)
+        .header("User-Agent", Client::VisionOs.user_agent())
+        .send()
+        .await
+        .context("cannot reach the visitor endpoint")?
+        .text()
+        .await
+        .context("cannot read the visitor response")?;
+    let issued = regex_lite::Regex::new(r#""(Cg[A-Za-z0-9%_+=-]{20,})""#)?
+        .captures(&body)
+        .and_then(|found| found.get(1))
+        .map(|found| found.as_str().to_string())
+        .context("the visitor response carries no visitor id")?;
+    log::debug!("ytmusic: adopted a server-issued visitor id");
+    Ok(issued)
+}
+
+/// Reads `DATASYNC_ID` off the signed-in home page, which is the only place Google publishes
+/// it. A brand account carries it as `delegated||user`; both halves belong to the binding, so
+/// the value is taken whole.
+async fn fetch_data_sync_id(api: &YtMusic) -> Result<String> {
+    let authed = api
+        .authed
+        .as_ref()
+        .context("the session is not signed in")?;
+    let body = authed
+        .http
+        .get(HOME_URL)
+        .header("User-Agent", Client::Music.user_agent())
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .send()
+        .await
+        .context("cannot reach the home page")?
+        .text()
+        .await
+        .context("cannot read the home page")?;
+    regex_lite::Regex::new(r#""DATASYNC_ID"\s*:\s*"([^"]+)""#)?
+        .captures(&body)
+        .and_then(|found| found.get(1))
+        .map(|found| found.as_str().to_string())
+        .context("the home page carries no data sync id")
+}
+
+/// Reads the content binding experiment off the YouTube Music page. The page is fetched signed
+/// in when the session is, since an experiment can be on for one account and off for another.
+async fn fetch_content_bound(api: &YtMusic) -> Result<bool> {
+    let http = api.authed.as_ref().map_or(&api.http, |authed| &authed.http);
+    let body = http
+        .get(MUSIC_URL)
+        .header("User-Agent", Client::Music.user_agent())
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .send()
+        .await
+        .context("cannot reach the music page")?
+        .text()
+        .await
+        .context("cannot read the music page")?;
+    content_bound(&body)
+}
+
+/// Whether a player configuration on `page` turns the content binding experiment on. This is
+/// yt-dlp's test: the last value of the flag in each `WEB_PLAYER_CONTEXT_CONFIGS` entry, and
+/// `true` in any of them.
+fn content_bound(page: &str) -> Result<bool> {
+    let (_, configs) = page
+        .split_once(r#""WEB_PLAYER_CONTEXT_CONFIGS""#)
+        .context("the page carries no player configuration")?;
+    let serialized =
+        regex_lite::Regex::new(r#""serializedExperimentFlags"\s*:\s*"((?:[^"\\]|\\.)*)""#)?;
+    let bound = serialized.captures_iter(configs).any(|found| {
+        let Ok(flags) = serde_json::from_str::<String>(&format!("\"{}\"", &found[1])) else {
+            return false;
+        };
+        flags
+            .split('&')
+            .filter_map(|pair| pair.split_once('='))
+            .rfind(|(name, _)| *name == CONTENT_BINDING)
+            .is_some_and(|(_, value)| value == "true")
+    });
+    Ok(bound)
+}
+
+impl Flags {
+    /// Whether this reading still stands: an hour for one that worked, a minute for a failure.
+    fn fresh(&self) -> bool {
+        let keep = match self.read {
+            true => FLAGS_KEEP,
+            false => FLAGS_RETRY,
+        };
+        self.at.elapsed() < keep
+    }
+}
+
+impl Authed {
+    fn store(&self) -> MutexGuard<'_, CookieStore> {
+        self.cookies
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// The `SAPISIDHASH` authorization for `origin`, computed from the SAPISID cookie in
+    /// the store.
+    fn authorization(&self, origin: &str) -> Option<String> {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or(0);
+        let sapisid = sapisid(&self.store())?;
+        Some(format!(
+            "SAPISIDHASH {}",
+            sid_hash(timestamp, &sapisid, origin)
+        ))
+    }
+
+    /// Serializes and replaces the cookie file under one lock so older snapshots cannot finish last.
+    /// Failures are logged and leave the cookies in memory.
+    fn save(&self) {
+        let Some(path) = &self.file else {
+            return;
+        };
+        let store = self.store();
+        let mut body = Vec::new();
+        if let Err(error) = cookie_store::serde::json::save(&store, &mut body) {
+            log::warn!("ytmusic: cannot encode the cookies: {error}");
+            return;
+        }
+        if let Err(error) = write_private(path, &body) {
+            log::warn!("ytmusic: cannot save the cookies: {error:#}");
+        }
+    }
+}
+
+/// Builds a store from a `Cookie` header value. Each pair becomes a secure `youtube.com`
+/// cookie. A pair that does not parse is logged and skipped.
+fn seed(header: &str) -> CookieStore {
+    let origin = origin();
+    let mut store = CookieStore::new();
+    for pair in header.split(';').map(str::trim) {
+        if !pair.contains('=') {
+            continue;
+        }
+        let attributes = match pair.starts_with("__Host-") {
+            true => SEEDED_HOST_ONLY,
+            false => SEEDED,
+        };
+        let inserted = RawCookie::parse(format!("{pair}; {attributes}"))
+            .map_err(anyhow::Error::from)
+            .and_then(|cookie| {
+                store
+                    .insert_raw(&cookie, &origin)
+                    .map_err(anyhow::Error::from)
+            });
+        if let Err(error) = inserted {
+            log::warn!("ytmusic: cannot parse a pasted cookie, skipping it: {error}");
+        }
+    }
+    store
+}
+
+fn sapisid(store: &CookieStore) -> Option<String> {
+    let origin = origin();
+    SAPISID.iter().find_map(|name| {
+        store
+            .get_request_values(&origin)
+            .find(|(found, _)| found == name)
+            .map(|(_, value)| value.to_string())
+    })
+}
+
+fn origin() -> reqwest::Url {
+    reqwest::Url::parse(COOKIE_ORIGIN).expect("a valid origin")
+}
+
+fn load(path: &Path) -> Option<CookieStore> {
+    let file = std::fs::File::open(path).ok()?;
+    match cookie_store::serde::json::load(std::io::BufReader::new(file)) {
+        Ok(store) => Some(store),
+        Err(error) => {
+            log::warn!("ytmusic: cannot read {}: {error}", path.display());
+            None
+        }
+    }
+}
+
+/// Replaces `path` through a unique temporary file that is synced before the rename.
+/// Temporary files are readable only by their owner on Unix and are removed on failure.
+fn write_private(path: &Path, body: &[u8]) -> Result<()> {
+    use std::io::Write as _;
+
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent).context("cannot create the cookie dir")?;
+    let mut temp = tempfile::Builder::new()
+        .prefix(".cookies-")
+        .tempfile_in(parent)
+        .context("cannot create a temporary cookie file")?;
+    temp.write_all(body).context("cannot write the cookies")?;
+    temp.as_file()
+        .sync_all()
+        .context("cannot sync the cookies")?;
+    temp.persist(path)
+        .with_context(|| format!("cannot replace {}", path.display()))?;
+    #[cfg(unix)]
+    std::fs::File::open(parent)
+        .and_then(|folder| folder.sync_all())
+        .context("cannot sync the cookie dir")?;
+    Ok(())
+}
+
+fn sid_hash(timestamp: u64, secret: &str, origin: &str) -> String {
+    use sha1::{Digest as _, Sha1};
+    let mut hasher = Sha1::new();
+    hasher.update(format!("{timestamp} {secret} {origin}"));
+    let hash = hasher.finalize();
+    let hex: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!("{timestamp}_{hex}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seeds_a_header_value() {
+        let store = seed("VISITOR_INFO1_LIVE=abc;   SAPISID=xyz/123; __Secure-3PAPISID=xyz/123  ");
+        assert_eq!(sapisid(&store), Some("xyz/123".to_string()));
+        let www = reqwest::Url::parse("https://www.youtube.com/youtubei/v1/browse").unwrap();
+        assert_eq!(store.get_request_values(&www).count(), 3);
+    }
+
+    #[test]
+    fn falls_back_to_secure_sapisid() {
+        let store = seed("__Secure-3PAPISID=only/456");
+        assert_eq!(sapisid(&store), Some("only/456".to_string()));
+    }
+
+    #[test]
+    fn seeded_cookies_survive_a_round_trip() {
+        let mut body = Vec::new();
+        cookie_store::serde::json::save(&seed("SAPISID=abc; SID=def"), &mut body).unwrap();
+        let store = cookie_store::serde::json::load(body.as_slice()).unwrap();
+        assert_eq!(sapisid(&store), Some("abc".to_string()));
+    }
+
+    #[test]
+    fn sid_hash_shape() {
+        let auth = format!(
+            "SAPISIDHASH {}",
+            sid_hash(1, "abc", "https://music.youtube.com")
+        );
+        assert!(auth.starts_with("SAPISIDHASH "));
+        assert_eq!(auth.split('_').nth(1).map(str::len), Some(40));
+    }
+}

@@ -459,7 +459,7 @@ impl Lyrics {
         let audio_id = id.clone();
         self.constellation_task = Some(self.io.load(
             async move {
-                let version = format!("constellation:{}", lyrics_auto::fingerprint(&serde_json::to_string(input.as_ref())?));
+                let version = format!("constellation:word-align-v8:{}", lyrics_auto::fingerprint(&serde_json::to_string(input.as_ref())?));
                 let read_db = db.clone();
                 let read_key = key.clone();
                 let read_version = version.clone();
@@ -609,6 +609,7 @@ impl Lyrics {
         self.following = Some(id.clone());
         self.offset_ms = 0;
         self.constellation_words = None;
+        self.constellation_task = None;
         self.auto_checked = false;
         self.auto_failed = false;
         self.chosen = 0;
@@ -908,6 +909,7 @@ impl Lyrics {
         self.following = None;
         self.offset_ms = 0;
         self.constellation_words = None;
+        self.constellation_task = None;
         self.prepared = None;
         self.hits.clear();
         self.chosen = 0;
